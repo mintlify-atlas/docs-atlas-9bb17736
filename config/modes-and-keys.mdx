@@ -1,7 +1,7 @@
 ---
-title: "Configure LLM Modes and API Keys in GenAI Lab"
+title: "Configure LLM Modes and API Keys for the GenAI Lab"
 sidebarTitle: "Modes & Keys"
-description: "Set OPENAI_API_KEY or ANTHROPIC_API_KEY to enable real LLM mode. Without a key the platform runs in keyless Mock mode for Lab 1 and MCP Tasks 1–3."
+description: "Set OPENAI_API_KEY or ANTHROPIC_API_KEY to enable real LLM mode. Without a key the platform defaults to keyless Mock mode for Lab 1 and MCP Tasks 1–3."
 ---
 
 GenAI Lab supports three distinct LLM backends, chosen at startup through a simple sidebar radio button. The platform's design principle is "real execution first" — every mode runs genuine Python, real LangChain objects, and a real vector store. Only the answer LLM differs across modes. Understanding how modes are resolved and how keys are validated saves you from silent failures and unexpected Mock-mode fallbacks during graded labs.
@@ -65,7 +65,7 @@ GenAI Lab supports three distinct LLM backends, chosen at startup through a simp
         return "claude" if m == "anthropic" else m
     ```
 
-    If neither `OPENAI_API_KEY` nor `ANTHROPIC_API_KEY` is present, the platform falls back to Mock mode automatically. The sidebar always shows which mode is currently active.
+    Two additional aliases are resolved by the same function: `"real"` behaves identically to `"auto"` — it resolves to the best available real mode. `"anthropic"` is normalised to `"claude"`, so either spelling is accepted. If neither `OPENAI_API_KEY` nor `ANTHROPIC_API_KEY` is present, the platform falls back to Mock mode automatically. The sidebar always shows which mode is currently active.
   </Tab>
 </Tabs>
 
@@ -138,6 +138,10 @@ DEFAULT_FASTEMBED    = os.environ.get("FASTEMBED_MODEL",    "BAAI/bge-small-en-v
         except Exception:
             pass
     ```
+
+    <Note>
+      `OPENAI_EMBED_MODEL` is **not** included in the secrets injection loop. To override the OpenAI embedding model on Streamlit Cloud you must set it as a system environment variable (outside `st.secrets`), or set it in the deployed container environment. For local deploys, `export OPENAI_EMBED_MODEL=...` before starting the app.
+    </Note>
   </Tab>
   <Tab title="Docker / Compose">
     Pass keys through the `environment:` section so they are available to the container without being baked into the image.
@@ -165,7 +169,7 @@ DEFAULT_FASTEMBED    = os.environ.get("FASTEMBED_MODEL",    "BAAI/bge-small-en-v
 
 ## Key validation with `check_llm`
 
-When a key is present, the sidebar makes **one tiny real API call** on load to verify the key and model actually respond. This surfaces an invalid or expired key immediately — before you attempt a graded Run five tasks later.
+When a key is present, the sidebar makes **one tiny real API call** on load to verify the key and model actually respond. The call sends the single-word message `"ping"` with `max_tokens=5` to minimise cost and latency. This surfaces an invalid or expired key immediately — before you attempt a graded Run five tasks later.
 
 ```python
 # sandbox.py

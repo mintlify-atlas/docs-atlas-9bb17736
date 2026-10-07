@@ -1,7 +1,7 @@
 ---
-title: "Lab 1: Build a RAG Pipeline with ChromaDB"
+title: "Lab 1: Build a RAG Pipeline with LangChain and ChromaDB"
 sidebarTitle: "Lab 1: RAG"
-description: "Build a complete Retrieval-Augmented Generation pipeline: load a PDF, chunk it, embed and index in ChromaDB, then answer questions grounded in the document."
+description: "Build a complete RAG pipeline: load a PDF, chunk it, embed it in ChromaDB, then answer questions grounded only in the document. Works in Mock mode."
 ---
 
 Lab 1 walks you through building a Retrieval-Augmented Generation pipeline from scratch using a synthetic company HR and benefits handbook as the knowledge base. Your goal is to create a system that answers plain-English questions about the document and **only** about the document — if the answer is not in the PDF, the system must say so rather than guessing. The lab runs fully in Mock mode, so no API key is needed to complete all five tasks.
@@ -32,9 +32,9 @@ The knowledge base is a bundled PDF (`SAMPLE_PDF`) containing a synthetic HR han
 | Task | Title | Points | LangChain piece |
 |------|-------|:------:|-----------------|
 | T1 | Load the PDF | 5 | `PyPDFLoader` |
-| T2 | Split into Chunks | 20 | `RecursiveCharacterTextSplitter` |
+| T2 | Split into Chunks | 20 | `RecursiveCharacterTextSplitter` (chunk\_size=1000, overlap=200) |
 | T3 | Embed + Store in ChromaDB | 25 | `get_embeddings(MODE)` + `make_vectorstore()` |
-| T4 | RAG Question-Answering Pipeline | 25 | `retriever` + `ChatPromptTemplate` + LLM |
+| T4 | RAG Question-Answering Pipeline | 25 | `retriever` (k=3) + `ChatPromptTemplate` + LLM |
 | T5 | Interactive RAG Loop | 25 | `def answer()` + `while True` |
 
 ## Sandbox Helpers
@@ -65,12 +65,13 @@ print(documents[0].page_content[:200])
 ```
 
 <Accordion title="Grading criteria for Task 1 (5 pts)">
+  The grader inspects both the submitted source (AST) and the live `documents` object at runtime.
+
   | Criterion | Points | What is checked |
   |---|---|---|
-  | `import` | 3 | `from langchain_community.document_loaders import PyPDFLoader` present in source |
-  | `create` | 3 | `PyPDFLoader(SAMPLE_PDF` call detected |
-  | `load` | 2 | `.load()` called |
-  | `inspect` | 2 | `len(documents` printed |
+  | `loader_imported` | 1 | A PDF loader class (e.g. `PyPDFLoader`) is imported from `langchain_community.document_loaders` |
+  | `loader_called_with_pdf_path` | 2 | The loader is instantiated with `SAMPLE_PDF` (or a `.pdf` path) |
+  | `documents_actually_loaded` | 2 | `documents` is assigned from a `.load()` call and is a non-empty `Document` list at runtime |
 </Accordion>
 
 ## Task 2 — Split the Document into Chunks
@@ -92,9 +93,11 @@ print("Number of chunks:", len(chunks))
 <Accordion title="Grading criteria for Task 2 (20 pts)">
   | Criterion | Points | What is checked |
   |---|---|---|
-  | `import` | 3 | `import RecursiveCharacterTextSplitter` present |
-  | `build` | 4 | Constructor called with `chunk_size` argument |
-  | `split` | 3 | `split_documents(documents` called |
+  | `splitter_created` | 3 | `RecursiveCharacterTextSplitter(...)` instantiated |
+  | `chunk_size_1000` | 4 | Splitter called with `chunk_size=1000` exactly |
+  | `chunk_overlap_200` | 4 | Splitter called with `chunk_overlap=200` exactly |
+  | `documents_split` | 5 | `split_documents(documents)` called and `chunks` is a non-empty `Document` list at runtime |
+  | `chunk_count_reported` | 4 | `print(... len(chunks) ...)` present in submitted code |
 </Accordion>
 
 ## Task 3 — Generate Embeddings and Store in ChromaDB
@@ -115,9 +118,12 @@ for i, doc in enumerate(results):
 <Accordion title="Grading criteria for Task 3 (25 pts)">
   | Criterion | Points | What is checked |
   |---|---|---|
-  | `embed` | 4 | `get_embeddings(MODE` called |
-  | `store` | 4 | `make_vectorstore(chunks` called |
-  | `search` | 2 | `similarity_search(` with `k=3` |
+  | `embeddings_created` | 5 | An embeddings object is created (not `None` at runtime) |
+  | `embedding_model_correct` | 4 | `get_embeddings(MODE)` called — model selected by the sandbox |
+  | `vectorstore_created` | 6 | `make_vectorstore(...)` (or `Chroma.from_documents`) called and returns an object with `.similarity_search` |
+  | `chunks_indexed` | 4 | `chunks` (not raw `documents`) passed to the vector store |
+  | `similarity_search_k3` | 4 | `.similarity_search(query, k=3)` called with `k=3` |
+  | `top3_results_obtained` | 2 | At runtime the result list contains exactly 3 retrieved `Document` objects |
 </Accordion>
 
 ## Task 4 — Build the RAG Question-Answering Pipeline
@@ -154,17 +160,20 @@ print("Pages:", sorted({d.metadata.get("page", "?") for d in docs}))
 ```
 
 <Warning>
-  The grader checks for the exact string `"I could not find the answer in the provided document."` inside your prompt. Paraphrasing it will fail the `grounding` criterion.
+  The grader checks for the exact string `"I could not find the answer in the provided document."` inside your prompt template. Paraphrasing it will fail the `prompt_is_grounded` criterion.
 </Warning>
 
 <Accordion title="Grading criteria for Task 4 (25 pts)">
   | Criterion | Points | What is checked |
   |---|---|---|
-  | `retriever` | 3 | `as_retriever(` called |
-  | `k3` | 2 | `k` set to `3` |
-  | `model` | 3 | `get_chat_model(MODE` called |
-  | `grounding` | 3 | Exact refusal sentence present in source |
-  | `invoke` | 2 | `llm.invoke` or `chain.invoke` called |
+  | `retriever_created` | 4 | `vectorstore.as_retriever(...)` called (or `similarity_search` used directly) |
+  | `retrieval_k_is_3` | 3 | Retriever or search configured with `k=3` |
+  | `llm_created` | 3 | `get_chat_model(MODE)` called and `llm` is not `None` |
+  | `prompt_is_grounded` | 3 | Prompt template contains `{context}`, `{question}`, and the exact refusal sentence |
+  | `retrieval_executed` | 3 | `retriever.invoke(...)` or `similarity_search(...)` is called |
+  | `context_built_from_docs` | 3 | A context string is assembled from retrieved documents' `page_content` |
+  | `context_passed_to_llm` | 3 | `llm.invoke(...)` receives the assembled context |
+  | `answer_generated_by_llm` | 3 | The answer is produced by an `.invoke(...)` call (not a hardcoded string), and is grounded in the retrieved context at runtime |
 </Accordion>
 
 ## Task 5 — Build an Interactive RAG Loop
@@ -191,22 +200,25 @@ while True:
 ```
 
 <Tip>
-  Reuse `retriever`, `llm`, and `prompt` from Task 4 — do not rebuild them inside `answer()`. The grader checks that `retriever.invoke` is called inside the function.
+  Reuse `retriever`, `llm`, and `prompt` from Task 4 — do not rebuild them inside `answer()`. The grader checks that `retriever.invoke` is called inside the function body.
 </Tip>
 
 <Accordion title="Grading criteria for Task 5 (25 pts)">
   | Criterion | Points | What is checked |
   |---|---|---|
-  | `func` | 3 | `def answer(` defined with a `return` statement |
-  | `loop` | 3 | `while True` present |
-  | `exit` | 2 | Stops on `"exit"` (checks `== 'exit'` or `.lower()`) |
-  | `reuse` | 2 | `retriever.invoke` called inside the function |
+  | `answer_function_defined` | 4 | `def answer(question):` defined with a non-stub body and a `return` statement |
+  | `answer_retrieves` | 4 | `answer()` calls `retriever.invoke(...)` or `similarity_search(...)` |
+  | `answer_invokes_llm_with_context` | 5 | `answer()` assembles context from `page_content` and calls `llm.invoke(...)` with it |
+  | `interactive_while_loop` | 4 | `while True:` loop present with `input(...)` inside |
+  | `reads_user_input` | 2 | `input()` called inside the loop |
+  | `stops_on_exit` | 3 | Loop breaks specifically when input equals `"exit"` (or `"quit"`) |
+  | `loop_calls_answer` | 3 | The `while True` loop calls `answer(...)` |
 </Accordion>
 
 ## Grading Rubric Summary
 
-The RAG lab uses criterion-based grading. Every criterion is evaluated independently by AST inspection of your source **and** by running Tasks 1…N in sequence and examining the real objects produced.
+The RAG lab uses criterion-based grading implemented in `grader.py`. Every criterion is evaluated independently by AST inspection of your source **and** by running Tasks 1…N in sequence and examining the real objects produced at runtime. Partial work earns partial credit — running successfully never by itself earns full marks.
 
 <Info>
-  Enable **🔧 Developer mode** (`?dev=1`) to see each criterion's pass/fail, points, reason string, and the exact source the grader inspected.
+  Enable **🔧 Developer mode** (`?dev=1` URL param or sidebar checkbox) to see each criterion's pass/fail, points awarded, reason string, and the exact source the grader inspected.
 </Info>

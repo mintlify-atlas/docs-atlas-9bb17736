@@ -4,7 +4,7 @@ sidebarTitle: "MCP Server"
 description: "mcp_server.py is a real FastMCP stdio server spawned as a subprocess by Lab 5. It exposes three tools and one resource via the Model Context Protocol."
 ---
 
-The platform ships a self-contained MCP server (`mcp_server.py`) that Lab 5 uses as a live backend for the Model Context Protocol exercises. It is a real `FastMCP` application from the `mcp` library — not a simulation — and communicates with the host process over JSON-RPC on stdio. When a learner's Lab 5 code instantiates `MultiServerMCPClient` using the config from `sandbox.mcp_stdio_config()`, the platform spawns this file as a subprocess, and the client negotiates the MCP handshake automatically. The server exposes three callable tools and one readable resource, all relevant to the HR policy knowledge base used throughout the labs.
+The platform ships a self-contained MCP server (`mcp_server.py`) that Lab 5 uses as a live backend for the Model Context Protocol exercises. It is a real `FastMCP` application — created as `FastMCP("sandbox-tools")` — from the `mcp` library, not a simulation, and communicates with the host process over JSON-RPC on stdio. When a learner's Lab 5 code instantiates `MultiServerMCPClient` using the config from `sandbox.mcp_stdio_config()`, the platform spawns this file as a subprocess, and the client negotiates the MCP handshake automatically. The server exposes three callable tools and one readable resource, all relevant to the HR policy knowledge base used throughout the labs.
 
 ## How It Is Launched
 

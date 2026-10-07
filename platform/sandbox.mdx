@@ -191,7 +191,7 @@ print(f"Split into {len(chunks)} chunks")
 Loads the bundled HR/policy PDF as a list of LangChain `Document` objects.
 
 <ResponseField name="return" type="list[Document]">
-  One `Document` per PDF page, each with `page_content` (extracted text) and `metadata` containing `source` (absolute path to the PDF) and `page` (zero-based page index). Uses `PyPDFLoader` from `langchain-community` if available; falls back to reading with `pypdf` directly so `langchain-community` is optional. If the PDF file is missing entirely, returns a single fallback `Document` containing the HR policy text literals.
+  One `Document` per PDF page, each with `page_content` (extracted text) and `metadata` containing `source` (absolute path to the PDF) and `page` (zero-based page index). Uses `PyPDFLoader` from `langchain-community` if available; falls back to reading with `pypdf` directly so `langchain-community` is optional. If the PDF file is missing entirely, returns a single fallback `Document` whose `page_content` is the `_FALLBACK_TEXT` constant — a short HR policy excerpt covering casual leave (12 days), sick leave (10 days), earned leave (18 days), notice period (60 calendar days), travel policy (economy-class domestic), and medical insurance (INR 5,00,000 per policy year).
 </ResponseField>
 
 ```python

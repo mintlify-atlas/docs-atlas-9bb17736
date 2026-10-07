@@ -1,7 +1,7 @@
 ---
 title: "Grading Engine: AST Analysis and Runtime Inspection"
 sidebarTitle: "Grader"
-description: "grader.py grades learner code with AST analysis and live namespace inspection — checking actual arguments, real objects, and LLM-generated output, not just keywords."
+description: "grader.py grades learner code using AST analysis and namespace inspection to verify real arguments, live object types, and LLM-generated answers."
 ---
 
 The grading engine (`grader.py`) evaluates learner-submitted code against a rubric of independent, named criteria. Unlike keyword-matching or substring-search approaches, every criterion performs a targeted structural or behavioral check: did the learner call `RecursiveCharacterTextSplitter` with `chunk_size=1000` (not 500)? At runtime, does `similarity_search` return exactly 3 `Document` objects? Is the final answer actually produced by an LLM call, or is it a hardcoded string? Each check returns a `(passed, reason)` tuple so learners receive specific, actionable feedback rather than a binary pass/fail.

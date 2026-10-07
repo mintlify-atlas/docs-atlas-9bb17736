@@ -1,7 +1,7 @@
 ---
 title: "Lab 5: Build an Agent over MCP (Model Context Protocol)"
 sidebarTitle: "Lab 5: MCP"
-description: "Connect to a real FastMCP stdio server, call and read its tools and resources, then build a full ReAct agent over MCP — the first three tasks work without an API key."
+description: "Connect to a real FastMCP stdio server, discover and invoke its tools, read a resource, then build a full ReAct agent over MCP tools in five tasks."
 ---
 
 Lab 5 introduces the Model Context Protocol (MCP), a standard JSON-RPC interface that lets any client connect to external tool servers without knowing their internals. The lab ships a real FastMCP server (`mcp_server.py`) that the app spawns as a subprocess. You connect to it with `MultiServerMCPClient` over stdio, discover its tools and resources, call them directly, and finally build a full LangGraph ReAct agent on top of the MCP tools. The first three tasks work in Mock mode — no API key needed.

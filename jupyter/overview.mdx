@@ -37,7 +37,11 @@ documents      chunks   vectorstore  retriever   (graded)
 
 ## Mock mode and the FastEmbed model
 
-When `SANDBOX_MODE` is `mock` (the default), the grader uses **FastEmbed** for local embeddings rather than calling an external API. On first run, FastEmbed downloads an ~90 MB model. Subsequent runs use the cached model from disk. No OpenAI or Anthropic key is needed to complete Lab 1 in this mode.
+The Dockerfile sets `SANDBOX_MODE=mock` as a default environment variable, so the environment boots ready to use without any API key. When mock mode is active, the grader uses **FastEmbed** for local embeddings rather than calling an external API. On first run, FastEmbed downloads an ~90 MB model. Subsequent runs use the cached model from disk. No OpenAI or Anthropic key is needed to complete Labs 1 or 2 in this mode.
+
+<Note>
+  Free CPU Spaces on Hugging Face run **Labs 1 and 2** comfortably. Labs 3–5 require the heavier packages (`chromadb`, `langgraph`, `fastembed`) and a larger Space or an alternative host such as Render or a Docker VM.
+</Note>
 
 ## JupyterLab vs Streamlit — which should you use?
 

@@ -1,7 +1,7 @@
 ---
-title: "GenAI Lab: Hands-On GenAI & Agentic-AI Practice"
+title: "GenAI Lab: Hands-On GenAI & Agentic-AI Engineering"
 sidebarTitle: "Home"
-description: "Five end-to-end labs for real GenAI engineering — RAG, tool calling, LangGraph agents, multi-agent systems, and MCP. Real execution, real grading, no simulation."
+description: "Five hands-on labs: RAG, tool calling, LangGraph agents, multi-agent, and MCP — with real Python execution, real grading, and no simulation."
 ---
 
 GenAI Lab is an interactive practice platform for developers learning GenAI and Agentic-AI engineering. Each of the five labs gives you a code editor, real Python execution, progressive hints, and a criterion-based grader that inspects both your code structure (via AST analysis) and the actual runtime objects it produces. No simulation — every run is genuine.
@@ -50,7 +50,7 @@ Each lab is a complete pipeline that you write, run, and submit from the browser
 
 <Steps>
   <Step title="Pick a lab and a mode">
-    Open the Streamlit app, select a lab from the sidebar, and choose **OpenAI**, **Claude**, or **Mock** (keyless) mode. Labs 1 and 5 Tasks 1–3 run fully in Mock mode; agent and tool-calling labs require a real LLM.
+    Open the Streamlit app, select a lab from the sidebar **Lab** selector, then choose an LLM mode from the **LLM mode** radio group — `🔷 OpenAI (real)`, `🟣 Claude (real)`, or `🧪 Mock (demo, no key)`. Labs 1 and 5 Tasks 1–3 run fully in Mock mode; tool-calling and agent labs require a real LLM.
   </Step>
   <Step title="Write your code">
     Each task gives you a prompt, starter code, and access to sandbox helpers (`get_chat_model`, `get_embeddings`, `make_vectorstore`, `get_tools`, etc.). Fill in the blanks.
@@ -64,5 +64,5 @@ Each lab is a complete pipeline that you write, run, and submit from the browser
 </Steps>
 
 <Note>
-  **Developer mode** — tick **🔧 Developer mode** in the sidebar (or add `?dev=1` to the URL) to see every rubric criterion's pass/fail, earned points, reason, and the exact source the grader executed.
+  **Developer mode** — tick **🔧 Developer mode — grading diagnostics** in the sidebar (or add `?dev=1` to the URL) to see every rubric criterion's pass/fail, earned points, reason, and the exact source the grader executed.
 </Note>

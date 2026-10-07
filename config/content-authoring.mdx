@@ -87,6 +87,8 @@ Each task is an item in the top-level `tasks` list. Labs conventionally have fiv
   def task_weight(t: dict, idx: int) -> int:
       return int(t.get("weight", TASK_WEIGHTS.get(t.get("id", idx + 1), 20)))
   ```
+
+  The built-in RAG lab (`01-rag`) uses explicit `weight:` fields on every task and therefore overrides the defaults: **T1 = 5, T2 = 20, T3 = 25, T4 = 25, T5 = 25**. This is the only built-in lab that differs from the default distribution.
 </ParamField>
 
 <ParamField path="tasks[].prompt" type="markdown string" required>

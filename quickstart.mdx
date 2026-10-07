@@ -1,7 +1,7 @@
 ---
-title: "Get Started with GenAI Lab in Five Minutes"
+title: "GenAI Lab Quickstart: Install and Run Your First Lab Task"
 sidebarTitle: "Quickstart"
-description: "Clone the repo, install dependencies, and run your first GenAI lab task locally using the Streamlit practice platform."
+description: "Clone the repo, install the lean dependencies on Python 3.12, and run your first GenAI lab task locally with the Streamlit practice platform in minutes."
 ---
 
 The fastest way to experience GenAI Lab is to run the Streamlit practice platform locally. The lean `requirements.txt` installs in about a minute on Python 3.12, and **Mock mode** lets you complete Lab 1 (RAG) and Lab 5 tasks 1–3 without any API key. The steps below take you from a fresh clone to your first scored task submission.
@@ -107,9 +107,11 @@ The fastest way to experience GenAI Lab is to run the Streamlit practice platfor
 
 ## First-Run Note: FastEmbed Model Download
 
-The first time you run Lab 1 in keyless (Mock) mode, GenAI Lab downloads the FastEmbed ONNX embedding model — approximately **90 MB**. This happens once and is cached locally. Subsequent runs start instantly.
+The lean `requirements.txt` does **not** include `fastembed`. In keyless (Mock) mode, Lab 1 uses the built-in `DeterministicFakeEmbedding` — no model download required and no external calls.
 
-If you're on a very restricted network or want to skip the download entirely, switch to **OpenAI mode** with a valid `OPENAI_API_KEY` — this uses `OpenAIEmbeddings` and never downloads a local model.
+If you install `requirements-full.txt` instead (which adds `fastembed`), the first run of Lab 1 in keyless mode downloads the FastEmbed ONNX embedding model — approximately **90 MB**. This happens once and is cached locally. Subsequent runs start instantly.
+
+To use real OpenAI embeddings without any local model download, set `OPENAI_API_KEY` and switch to **OpenAI mode** — this uses `OpenAIEmbeddings` and never downloads a local model.
 
 ## Enabling Real LLM Mode
 

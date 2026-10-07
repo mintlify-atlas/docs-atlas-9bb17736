@@ -1,7 +1,7 @@
 ---
-title: "Lab 3: Build a LangGraph ReAct Agent"
+title: "Lab 3: Autonomous ReAct Agent with LangGraph Prebuilt"
 sidebarTitle: "Lab 3: Agent"
-description: "Use LangGraph's create_react_agent to build a ReAct agent, customize it with a persona, stream its steps, inspect the graph, and extend it with a custom tool."
+description: "Use LangGraph create_react_agent to build a ReAct agent, give it a persona, stream its steps, inspect the graph, and extend it with a custom tool."
 ---
 
 Lab 3 moves from the manual tool loop of Lab 2 to an autonomous ReAct agent built with LangGraph's `create_react_agent`. The agent manages the `model → tools → model → …` cycle on its own — you just give it a model, a list of tools, and a question. Each task then extends the baseline agent: you add a persona, watch it stream step by step, visualise the underlying state graph as ASCII art, and finally attach your own `@tool` alongside the built-in ones.

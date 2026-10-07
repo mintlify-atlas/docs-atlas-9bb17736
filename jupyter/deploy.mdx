@@ -248,3 +248,11 @@ os.environ["SANDBOX_MODE"] = "openai"   # or "claude" for Anthropic
 <Tip>
   You can also set `ANTHROPIC_API_KEY` if you want to run the labs against Claude. The `sandbox.py` helper reads `SANDBOX_MODE` and routes calls to the correct provider automatically.
 </Tip>
+
+## VS Code alternative
+
+The repository also includes `Dockerfile.codeserver`, which swaps JupyterLab for **code-server** (VS Code in the browser) while mounting the same `content/`, `grader.py`, and `sandbox.py`. Build from `Dockerfile.codeserver` instead of `Dockerfile` — everything else in your deployment stays the same.
+
+<Note>
+  For the current labs — which build a step-by-step RAG pipeline across cells — JupyterLab is the stronger fit. Code-server is better suited to a future multi-file "build and ship an agent" capstone project.
+</Note>
