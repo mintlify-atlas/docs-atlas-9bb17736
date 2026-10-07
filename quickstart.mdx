@@ -1,47 +1,168 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get Started with GenAI Lab in Five Minutes"
+sidebarTitle: "Quickstart"
+description: "Clone the repo, install dependencies, and run your first GenAI lab task locally using the Streamlit practice platform."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
-
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
+The fastest way to experience GenAI Lab is to run the Streamlit practice platform locally. The lean `requirements.txt` installs in about a minute on Python 3.12, and **Mock mode** lets you complete Lab 1 (RAG) and Lab 5 tasks 1–3 without any API key. The steps below take you from a fresh clone to your first scored task submission.
 
 ## Prerequisites
 
-Before you begin, you must have:
-
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
-
-## Get started
+- **Python 3.12** — required. Python 3.13 causes native-wheel build failures for packages like `ormsgpack` and `chroma-hnswlib`. Use `python --version` to confirm.
+- **pip** — bundled with Python 3.12.
+- A terminal and internet access for the initial install.
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
+  <Step title="Clone the repository">
+    Clone the repo and navigate into the platform folder. The Streamlit app and its `requirements.txt` live in `GenAIPracticePlatform8th/`.
 
     ```bash
-    npm install your-package
+    git clone https://github.com/nithyasatheesh/GenAI-Lab-Sep.git
+    cd GenAI-Lab-Sep/GenAIPracticePlatform8th
     ```
   </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
+
+  <Step title="Create and activate a virtual environment">
+    Isolating dependencies in a virtual environment prevents conflicts with other Python projects on your system.
 
     ```bash
-    your-cli init
+    python -m venv .venv
     ```
+
+    Activate it for your platform:
+
+    <Tabs>
+      <Tab title="macOS / Linux">
+        ```bash
+        source .venv/bin/activate
+        ```
+      </Tab>
+      <Tab title="Windows">
+        ```bash
+        .venv\Scripts\activate
+        ```
+      </Tab>
+    </Tabs>
   </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
+
+  <Step title="Install the lean dependencies">
+    The `requirements.txt` in this folder is deliberately lean — no ChromaDB, LangGraph, or MCP. It resolves to pure-Python wheels and installs quickly. This set fully supports Labs 1 and 2 plus the entire graded UI.
 
     ```bash
-    your-cli start
+    pip install -r requirements.txt
     ```
+
+    The lean set includes:
+
+    ```text
+    streamlit
+    pyyaml
+    openpyxl
+    langchain-core
+    langchain-community
+    langchain-text-splitters
+    langchain-openai
+    langchain-anthropic
+    openai
+    anthropic
+    pypdf
+    ```
+
+    <Note>
+      Labs 3–5 (LangGraph Agent, Multi-Agent, MCP) require the full stack. Install `requirements-full.txt` instead when you're ready for those labs:
+
+      ```bash
+      pip install -r requirements-full.txt
+      ```
+
+      This adds `chromadb`, `langchain-chroma`, `langgraph`, `mcp`, `langchain-mcp-adapters`, and `fastembed` on top of the lean set.
+    </Note>
+  </Step>
+
+  <Step title="Start the Streamlit app">
+    Launch the app from the same `GenAIPracticePlatform8th/` directory. Streamlit opens a local server and prints the URL.
+
+    ```bash
+    streamlit run streamlit_app.py
+    ```
+
+    The app will be available at `http://localhost:8501` in your browser.
+  </Step>
+
+  <Step title="Open Lab 1, select Mock mode, and run Task 1">
+    In the browser:
+
+    1. Select **Lab 1 — RAG with ChromaDB** from the sidebar.
+    2. Set the LLM mode to **Mock** (no API key needed).
+    3. Read the task prompt and review the starter code in the editor.
+    4. Click **▶ Run** to execute your code.
+    5. Inspect the output panel — you'll see real stdout, the execution steps, and any errors.
+    6. Click **Grade** (or complete all five tasks and visit the **★ Score** page) to see your criterion-by-criterion results.
+
+    <Tip>
+      Enable **🔧 Developer mode** in the sidebar (or add `?dev=1` to the URL) to see every grading criterion's pass/fail status, point value, and the exact reason it passed or failed.
+    </Tip>
   </Step>
 </Steps>
 
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
+## First-Run Note: FastEmbed Model Download
 
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
+The first time you run Lab 1 in keyless (Mock) mode, GenAI Lab downloads the FastEmbed ONNX embedding model — approximately **90 MB**. This happens once and is cached locally. Subsequent runs start instantly.
+
+If you're on a very restricted network or want to skip the download entirely, switch to **OpenAI mode** with a valid `OPENAI_API_KEY` — this uses `OpenAIEmbeddings` and never downloads a local model.
+
+## Enabling Real LLM Mode
+
+Set one of the following environment variables before launching the app. The sidebar automatically detects the key and switches to the appropriate real mode.
+
+<Tabs>
+  <Tab title="OpenAI">
+    ```bash
+    export OPENAI_API_KEY=sk-...
+    streamlit run streamlit_app.py
+    ```
+
+    Uses `ChatOpenAI` with `gpt-4o-mini` by default. Override the model with:
+
+    ```bash
+    export OPENAI_MODEL=gpt-4o
+    ```
+  </Tab>
+  <Tab title="Claude (Anthropic)">
+    ```bash
+    export ANTHROPIC_API_KEY=sk-ant-...
+    streamlit run streamlit_app.py
+    ```
+
+    Uses `ChatAnthropic` with `claude-sonnet-4-5` by default. Override the model with:
+
+    ```bash
+    export ANTHROPIC_MODEL=claude-3-5-haiku-20241022
+    ```
+  </Tab>
+  <Tab title="Windows (PowerShell)">
+    ```powershell
+    $env:OPENAI_API_KEY = "sk-..."
+    streamlit run streamlit_app.py
+    ```
+  </Tab>
+</Tabs>
+
+<Warning>
+  API keys are read **only** from environment variables or server-side secrets. They are never hard-coded in source and never sent to the browser. Do not paste your key into the code editor inside the app.
+</Warning>
+
+## What's Available in Each Mode
+
+| Lab | Mock (no key) | Real LLM (OpenAI or Claude) |
+|-----|---------------|-----------------------------|
+| 1 · RAG | ✅ Full | ✅ Full + real OpenAI embeddings |
+| 2 · Tool Calling | ❌ Blocked | ✅ Full |
+| 3 · Agent (LangGraph) | ❌ Blocked | ✅ Full (requires `requirements-full.txt`) |
+| 4 · Multi-Agent | ❌ Blocked | ✅ Full (requires `requirements-full.txt`) |
+| 5 · MCP (tasks 1–3) | ✅ Full | ✅ Full |
+| 5 · MCP (tasks 4–5) | ❌ Blocked | ✅ Full (requires `requirements-full.txt`) |
+
+<Tip>
+  Ready to deploy to the cloud or share with a team? See the [Deployment guide](/deployment) for Streamlit Community Cloud, Docker/Compose, Render, Railway, and Fly.io options.
 </Tip>

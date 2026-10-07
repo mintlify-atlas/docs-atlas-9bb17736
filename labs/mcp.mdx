@@ -1,0 +1,208 @@
+---
+title: "Lab 5: Build an Agent over MCP (Model Context Protocol)"
+sidebarTitle: "Lab 5: MCP"
+description: "Connect to a real FastMCP stdio server, call and read its tools and resources, then build a full ReAct agent over MCP — the first three tasks work without an API key."
+---
+
+Lab 5 introduces the Model Context Protocol (MCP), a standard JSON-RPC interface that lets any client connect to external tool servers without knowing their internals. The lab ships a real FastMCP server (`mcp_server.py`) that the app spawns as a subprocess. You connect to it with `MultiServerMCPClient` over stdio, discover its tools and resources, call them directly, and finally build a full LangGraph ReAct agent on top of the MCP tools. The first three tasks work in Mock mode — no API key needed.
+
+<Note>
+  This lab requires the `mcp` and `langchain-mcp-adapters` packages from `requirements-full.txt`. Install them locally with `pip install -r requirements-full.txt`. On the default Streamlit Community Cloud deploy these packages are absent and Run will be blocked with an explanatory message — run this lab locally or in Docker.
+</Note>
+
+## Architecture
+
+```text
+your code ─▶ MultiServerMCPClient ──stdio/JSON-RPC──▶ mcp_server.py (FastMCP)
+                    │                                       ├─ tool: add
+                    └─ get_tools() → LangChain tools        ├─ tool: multiply
+                    └─ get_resources() → resource data      ├─ tool: leave_allowance
+                                                            └─ resource: policy://notice-period
+```
+
+The MCP client translates between LangChain's tool interface and the MCP JSON-RPC protocol. From your code's perspective, MCP tools look and behave like any other LangChain `@tool` objects — the transport is transparent.
+
+## Server Tools and Resources
+
+`mcp_server.py` exposes the following via MCP:
+
+| Type | Name | What it does |
+|---|---|---|
+| Tool | `add` | Returns the sum of two numbers |
+| Tool | `multiply` | Returns the product of two numbers |
+| Tool | `leave_allowance` | Returns the number of leave days for a given leave type (`"earned"`, `"sick"`, `"casual"`) |
+| Resource | `policy://notice-period` | Returns the notice period policy text from the HR handbook |
+
+## The `mcp_stdio_config()` Helper
+
+`mcp_stdio_config()` is injected into every Run automatically. It returns the configuration dict that `MultiServerMCPClient` expects to launch and connect to `mcp_server.py` over stdio. You do not need to construct this dict manually.
+
+```python
+# What mcp_stdio_config() returns (conceptually):
+{
+    "sandbox": {
+        "command": "python",
+        "args": ["/path/to/mcp_server.py"],
+        "transport": "stdio",
+    }
+}
+```
+
+Pass it directly to `MultiServerMCPClient`:
+
+```python
+from langchain_mcp_adapters.client import MultiServerMCPClient
+client = MultiServerMCPClient(mcp_stdio_config())
+```
+
+## Mode Requirements
+
+| Tasks | Mock mode | Real LLM required |
+|---|---|---|
+| T1 – T3 | ✅ Fully supported | No API key needed |
+| T4 – T5 | ❌ Blocked | OpenAI or Claude |
+
+## Task 1 — Connect and Discover
+
+Start the MCP client, `await client.get_tools()`, and print the name, description, and argument schema of every tool the server exposes. The entire main function is async — wrap it with `asyncio.run()`.
+
+```python
+import asyncio
+from langchain_mcp_adapters.client import MultiServerMCPClient
+
+async def main():
+    client = MultiServerMCPClient(mcp_stdio_config())
+    tools = await client.get_tools()
+    for t in tools:
+        print(f"{t.name}: {t.description}  args={t.args}")
+
+asyncio.run(main())
+```
+
+<Accordion title="Grading criteria for Task 1">
+  | Criterion | Points | What is checked |
+  |---|---|---|
+  | `import` | 3 | `from langchain_mcp_adapters.client import MultiServerMCPClient` |
+  | `cfg` | 3 | `MultiServerMCPClient(mcp_stdio_config())` |
+  | `tools` | 4 | `await client.get_tools()` |
+</Accordion>
+
+## Task 2 — Call an MCP Tool
+
+Build a `by_name` lookup dict from the tool list and call `multiply` with `a=6, b=7` using the async `.ainvoke()` method. MCP tools are async-native LangChain tools.
+
+```python
+import asyncio
+from langchain_mcp_adapters.client import MultiServerMCPClient
+
+async def main():
+    client = MultiServerMCPClient(mcp_stdio_config())
+    by_name = {t.name: t for t in await client.get_tools()}
+    out = await by_name["multiply"].ainvoke({"a": 6, "b": 7})
+    print("multiply(6, 7) =", out)
+    print("leave_allowance('earned') =",
+          await by_name["leave_allowance"].ainvoke({"kind": "earned"}))
+
+asyncio.run(main())
+```
+
+<Accordion title="Grading criteria for Task 2">
+  | Criterion | Points | What is checked |
+  |---|---|---|
+  | `pick` | 4 | `by_name = {` dict or direct `["multiply"` access |
+  | `invoke` | 6 | `await ... .ainvoke({` called |
+</Accordion>
+
+## Task 3 — Read an MCP Resource
+
+Call `await client.get_resources("sandbox")` to fetch the server's resources. Each returned item holds policy text from the HR handbook. Print each resource's data.
+
+```python
+import asyncio
+from langchain_mcp_adapters.client import MultiServerMCPClient
+
+async def main():
+    client = MultiServerMCPClient(mcp_stdio_config())
+    res = await client.get_resources("sandbox")
+    for r in res:
+        print(getattr(r, "data", getattr(r, "text", r)))
+
+asyncio.run(main())
+```
+
+<Accordion title="Grading criteria for Task 3">
+  | Criterion | Points | What is checked |
+  |---|---|---|
+  | `get` | 6 | `get_resources("sandbox")` called |
+  | `show` | 4 | `for r in res` iterates and prints |
+</Accordion>
+
+## Task 4 — MCP Tools with a Real Model
+
+Bind the MCP tools to a real LLM and handle one manual round-trip: ask a question, let the model request a tool, execute it with `await .ainvoke()`, wrap the result in a `ToolMessage`, and re-invoke the model for the final answer.
+
+```python
+import asyncio
+from langchain_core.messages import HumanMessage, ToolMessage
+from langchain_mcp_adapters.client import MultiServerMCPClient
+
+async def main():
+    client = MultiServerMCPClient(mcp_stdio_config())
+    tools = await client.get_tools()
+    by_name = {t.name: t for t in tools}
+    llm = get_chat_model(MODE).bind_tools(tools)
+    q = "What is 19 times 21?"
+    resp = await llm.ainvoke([HumanMessage(q)])
+    print("tool_calls:", resp.tool_calls)
+    msgs = [HumanMessage(q), resp]
+    for tc in resp.tool_calls:
+        out = await by_name[tc["name"]].ainvoke(tc["args"])
+        msgs.append(ToolMessage(content=str(out), tool_call_id=tc["id"]))
+    print("ANSWER:", (await llm.ainvoke(msgs)).content)
+
+asyncio.run(main())
+```
+
+<Warning>
+  Tasks 4 and 5 are blocked in Mock mode. The app shows a clear message — switch to OpenAI or Claude mode in the sidebar.
+</Warning>
+
+<Accordion title="Grading criteria for Task 4">
+  | Criterion | Points | What is checked |
+  |---|---|---|
+  | `bind` | 4 | `bind_tools(tools` called |
+  | `ainv` | 3 | `await llm.ainvoke` used |
+  | `back` | 3 | `ToolMessage(` constructed and fed back |
+</Accordion>
+
+## Task 5 — ReAct Agent over MCP
+
+Pass the MCP tools directly to `create_react_agent`. The agent manages the full async loop — you just `await agent.ainvoke()` and print the result.
+
+```python
+import asyncio
+from langgraph.prebuilt import create_react_agent
+from langchain_mcp_adapters.client import MultiServerMCPClient
+
+async def main():
+    client = MultiServerMCPClient(mcp_stdio_config())
+    tools = await client.get_tools()
+    agent = create_react_agent(get_chat_model(MODE), tools)
+    q = "What is 8 times 9, and how many sick leave days do we get?"
+    result = await agent.ainvoke({"messages": [{"role": "user", "content": q}]})
+    for m in result["messages"]:
+        m.pretty_print()
+
+asyncio.run(main())
+```
+
+<Accordion title="Grading criteria for Task 5">
+  | Criterion | Points | What is checked |
+  |---|---|---|
+  | `agent` | 5 | `create_react_agent(get_chat_model(MODE), tools` called |
+  | `ainv` | 5 | `await agent.ainvoke(` called |
+</Accordion>
+
+<Tip>
+  Notice that MCP tools are drop-in replacements for standard LangChain tools. `create_react_agent` in Task 5 is identical to Lab 3 Task 1 — the only difference is that `tools` now came from `await client.get_tools()` over stdio instead of from `get_tools()`.
+</Tip>

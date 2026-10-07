@@ -1,0 +1,69 @@
+---
+title: "GenAI Lab JupyterLab: Real Notebooks in the Browser"
+sidebarTitle: "Overview"
+description: "Run GenAI Lab in a real browser-based JupyterLab — no local install, real Python kernel, the same grader.py and sandbox.py as the Streamlit platform."
+---
+
+GenAI Lab ships a fully self-contained JupyterLab image that runs entirely in the browser — not a widget imitation, but a genuine JupyterLab server backed by a live Python kernel. You get real cells, real stdout and stderr, real tracebacks, and the exact same `grader.py`, `sandbox.py`, `content/` folder, and rubrics that power the Streamlit platform. There is no local installation and no API key required to start: the environment boots in **Mock mode** by default so you can begin Lab 1 immediately.
+
+## What's inside the environment
+
+The image lands you in `/home/learner/work` with two notebooks pre-loaded:
+
+| File | Purpose |
+|---|---|
+| `RAG_Lab_Participant.ipynb` | The exercise — this is where you write code |
+| `RAG_Lab.ipynb` | The fully-worked reference solution — open only after you've tried |
+
+Both notebooks sit alongside `grader.py`, `sandbox.py`, and the `content/` directory. These files are **byte-for-byte identical** to what the Streamlit platform uses, so a score earned in JupyterLab means exactly the same thing as one earned in the Streamlit UI.
+
+## How a lab session works
+
+The workflow mirrors how a real data-science notebook pipeline is built: each task cell produces a variable that the next task cell consumes. The kernel is shared across all cells, so there is no need to re-run setup code between tasks.
+
+```text
+Setup cell → Task 1 → Task 2 → Task 3 → … → Score cell
+documents      chunks   vectorstore  retriever   (graded)
+```
+
+1. Open `RAG_Lab_Participant.ipynb`.
+2. Run the **Setup** cell once — it imports helpers, sets `SANDBOX_MODE`, and makes `grader` available.
+3. Fill in each `%%task N` cell and run it. Variables defined in Task 1 (`documents`) flow directly into Task 2 (`chunks`), and so on through the full RAG pipeline.
+4. Run the **Score** cell at any point to receive a criterion-by-criterion breakdown out of 100.
+
+<Note>
+  The `%%task N` prefix is a plain comment convention, not a custom IPython magic. Each cell is ordinary Python — you can add `print()` calls, inspect intermediate values, and re-run cells as many times as you like before hitting **Score**.
+</Note>
+
+## Mock mode and the FastEmbed model
+
+When `SANDBOX_MODE` is `mock` (the default), the grader uses **FastEmbed** for local embeddings rather than calling an external API. On first run, FastEmbed downloads an ~90 MB model. Subsequent runs use the cached model from disk. No OpenAI or Anthropic key is needed to complete Lab 1 in this mode.
+
+## JupyterLab vs Streamlit — which should you use?
+
+Both environments run the same labs and produce the same scores. The difference is in learning style and delivery format.
+
+| | JupyterLab | Streamlit |
+|---|---|---|
+| **Interface** | Real notebook cells, shared kernel | Structured task-by-task UI |
+| **Exploration** | Full cell output, intermediate inspection | Contained within task panels |
+| **Hints / guidance** | In the notebook markdown cells | Inline in the UI per task |
+| **Best for** | Learners comfortable with notebooks | Guided, step-by-step experience |
+| **Variable state** | Persists across all cells in one session | Isolated per task submission |
+
+<CardGroup cols={2}>
+  <Card title="Deploy JupyterLab" icon="rocket" href="/jupyter/deploy">
+    Deploy to Hugging Face Spaces, Render, Railway, Fly.io, or a Docker VM — with token-gated access control.
+  </Card>
+  <Card title="Using the Notebooks" icon="book-open" href="/jupyter/usage">
+    Step-by-step guide to opening the participant notebook, running task cells, and grading your work in real time.
+  </Card>
+</CardGroup>
+
+## VS Code alternative
+
+If you prefer an IDE experience, the repository includes `Dockerfile.codeserver`, which swaps JupyterLab for **code-server** (VS Code in the browser) while mounting the same content. For the current labs — which build a step-by-step pipeline across cells — JupyterLab is the stronger fit. Code-server is better suited to a future multi-file "build and ship an agent" capstone project.
+
+<Note>
+  To use code-server, build from `Dockerfile.codeserver` instead of `Dockerfile`. Everything else — content, grader, sandbox — stays the same.
+</Note>

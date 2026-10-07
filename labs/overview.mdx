@@ -1,0 +1,119 @@
+---
+title: "GenAI Lab: Five Labs for AI Engineering Practice"
+sidebarTitle: "Overview"
+description: "Browse all five GenAI Lab exercises — from RAG pipelines to MCP agents. Each lab has five tasks, real execution, and criterion-based auto-grading."
+---
+
+GenAI Lab is a hands-on practice platform for real GenAI and Agentic-AI engineering. Every exercise runs inside your own Python interpreter — no simulated outputs, no mocked traces. You write code, hit **Run**, watch real stdout and stack traces, then hit **Check** to see a criterion-by-criterion score. Five labs, five tasks each, 100 points per lab.
+
+## Lab Structure
+
+Each lab follows the same flow:
+
+<Steps>
+  <Step title="Read the prompt">
+    Each task opens with a clear goal, a starter code scaffold, and progressive hints you can reveal one at a time.
+  </Step>
+  <Step title="Write and run your code">
+    The built-in editor feeds your code to `exec()` in the app's own interpreter. Real stdout, real tracebacks, real LangChain objects.
+  </Step>
+  <Step title="Check your score">
+    The grader parses your submitted code with AST analysis *and* inspects the real objects produced at runtime. Partial work earns partial credit.
+  </Step>
+  <Step title="Submit">
+    The **★ Score** page totals all task scores and lets you export results as Excel `.xlsx`, CSV, or JSON.
+  </Step>
+</Steps>
+
+## The Five Labs
+
+<CardGroup cols={2}>
+  <Card title="Lab 1: RAG with ChromaDB" icon="database" href="/labs/rag">
+    Load a PDF, chunk it, embed and index in ChromaDB, then answer questions grounded only in the document. Works in Mock mode — no API key needed.
+  </Card>
+  <Card title="Lab 2: Tool Calling" icon="wrench" href="/labs/tool-calling">
+    Bind real LangChain tools to a chat model, handle `tool_calls`, execute them with `ToolMessage`, and build a complete multi-step tool loop.
+  </Card>
+  <Card title="Lab 3: LangGraph Agent" icon="robot" href="/labs/agent">
+    Use `create_react_agent` to build a ReAct agent, give it a persona, stream its reasoning steps, inspect the graph, and add a custom `@tool`.
+  </Card>
+  <Card title="Lab 4: Multi-Agent" icon="sitemap" href="/labs/multi-agent">
+    Wire a supervisor LLM and two specialist sub-agents onto a `StateGraph`. The supervisor routes with structured output; workers loop back until done.
+  </Card>
+  <Card title="Lab 5: MCP" icon="plug" href="/labs/mcp">
+    Connect to a real FastMCP stdio server, discover and invoke its tools, read a resource, then build a full ReAct agent over MCP — Tasks 1–3 need no key.
+  </Card>
+</CardGroup>
+
+## Scoring System
+
+Every lab is worth **100 points** spread across five weighted tasks. The RAG lab weights are fixed (`T1 5 · T2 20 · T3 25 · T4 25 · T5 25`); all other labs declare their weights in their `practice.yaml`.
+
+The grading engine (`grader.py`) is criterion-based:
+
+| What it checks | How |
+|---|---|
+| Code structure | AST parse of your submitted source — checks imports, function calls, patterns |
+| Runtime objects | Executes Tasks 1…N in sequence and inspects the real objects produced |
+| Partial credit | Each criterion awards its own points independently — running successfully never by itself earns full marks |
+| Exact values | Some criteria check for specific strings (e.g. the exact refusal sentence in the RAG prompt) |
+
+<Tip>
+  Enable **🔧 Developer mode** (sidebar checkbox or add `?dev=1` to the URL) to see every criterion's pass/fail status, points awarded, reason string, and the exact source the grader evaluated.
+</Tip>
+
+## Mode Requirements
+
+The LLM mode is set in the sidebar. Labs that require real tool-calling cannot run in Mock mode.
+
+| Lab | Tasks | Mock mode | Real LLM required |
+|---|---|---|---|
+| 1 · RAG | All 5 | ✅ Fully supported | Optional (improves answer quality) |
+| 2 · Tool Calling | All 5 | ❌ Blocked | OpenAI or Claude |
+| 3 · Agent | All 5 | ❌ Blocked | OpenAI or Claude |
+| 4 · Multi-Agent | All 5 | ❌ Blocked | OpenAI or Claude |
+| 5 · MCP | Tasks 1–3 | ✅ Supported | Tasks 4–5 require OpenAI or Claude |
+
+<Note>
+  The app defaults to a real LLM mode when an API key is present in the environment and falls back to Mock otherwise. Set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` as an environment variable locally, or in **Manage app → Settings → Secrets** on Streamlit Community Cloud.
+</Note>
+
+## Available LLM Modes
+
+| Mode | Model | Requirement |
+|---|---|---|
+| **OpenAI** | `ChatOpenAI` (default `gpt-4o-mini`, override with `OPENAI_MODEL`) | `OPENAI_API_KEY` |
+| **Claude** | `ChatAnthropic` (default `claude-sonnet-4-5`, override with `ANTHROPIC_MODEL`) | `ANTHROPIC_API_KEY` |
+| **Mock** | Local `BaseChatModel` answering from retrieved context | Nothing — no key needed |
+
+## Developer Mode
+
+Tick **🔧 Developer mode** in the sidebar or append `?dev=1` to the app URL to unlock the grading internals panel. For every criterion in a checked task you will see:
+
+- ✅ / ❌ pass/fail
+- Points awarded vs. points available
+- The reason string (e.g. `"pattern not found: similarity_search"`)
+- The exact source snippet the grader ran against
+
+This is the fastest way to understand why a partial solution scored what it did.
+
+## Score Export
+
+The **★ Score** page aggregates all lab totals and exports them in three formats:
+
+- **Excel `.xlsx`** — a summary sheet plus a per-task breakdown table with criterion detail
+- **CSV** — flat table, one row per task
+- **JSON** — full grading response object for programmatic use
+
+## What is Always Real
+
+The following pieces are never simulated, regardless of LLM mode:
+
+| Component | Implementation |
+|---|---|
+| Python execution | `exec(compile(source), namespace)` in the live interpreter — real stdout, real exceptions |
+| LangChain objects | Genuine loaders, splitters, chains, `StateGraph`, `create_react_agent` |
+| Vector store | Real ChromaDB (`EphemeralClient`) with automatic fallback to `InMemoryVectorStore` |
+| Embeddings | OpenAI mode → `OpenAIEmbeddings`; keyless → FastEmbed ONNX model |
+| Tools | Real LangChain `@tool` objects (`calculator`, `word_count`, `kb_lookup`) |
+| MCP | `mcp_server.py` launched as a real subprocess; `langchain-mcp-adapters` over stdio |

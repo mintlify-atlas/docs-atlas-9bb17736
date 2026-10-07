@@ -1,0 +1,212 @@
+---
+title: "Lab 1: Build a RAG Pipeline with ChromaDB"
+sidebarTitle: "Lab 1: RAG"
+description: "Build a complete Retrieval-Augmented Generation pipeline: load a PDF, chunk it, embed and index in ChromaDB, then answer questions grounded in the document."
+---
+
+Lab 1 walks you through building a Retrieval-Augmented Generation pipeline from scratch using a synthetic company HR and benefits handbook as the knowledge base. Your goal is to create a system that answers plain-English questions about the document and **only** about the document — if the answer is not in the PDF, the system must say so rather than guessing. The lab runs fully in Mock mode, so no API key is needed to complete all five tasks.
+
+## Lab Overview
+
+The knowledge base is a bundled PDF (`SAMPLE_PDF`) containing a synthetic HR handbook. The pipeline you build flows from raw PDF pages through chunking, embedding, and vector storage before it can answer a question. The final task wraps everything in an interactive loop.
+
+```text
+          PDF  ──▶  PyPDFLoader  ──▶  Splitter  ──▶  Embeddings  ──▶  ChromaDB
+                      Task 1          Task 2          Task 3            Task 3
+                                                                          │
+                                                                    retriever (k=3)
+                                                                          │
+                                                             ChatPromptTemplate + LLM
+                                                                     Task 4
+                                                                          │
+                                                              def answer() + while loop
+                                                                     Task 5
+```
+
+<Note>
+  Mock mode is fully supported for this lab. In keyless mode the embedding model is a local FastEmbed ONNX model (~90 MB, downloaded once on first run) and the answer LLM is a local context-grounded stand-in. Switch to OpenAI or Claude mode for real `OpenAIEmbeddings` and a full generative answer.
+</Note>
+
+## Task Breakdown
+
+| Task | Title | Points | LangChain piece |
+|------|-------|:------:|-----------------|
+| T1 | Load the PDF | 5 | `PyPDFLoader` |
+| T2 | Split into Chunks | 20 | `RecursiveCharacterTextSplitter` |
+| T3 | Embed + Store in ChromaDB | 25 | `get_embeddings(MODE)` + `make_vectorstore()` |
+| T4 | RAG Question-Answering Pipeline | 25 | `retriever` + `ChatPromptTemplate` + LLM |
+| T5 | Interactive RAG Loop | 25 | `def answer()` + `while True` |
+
+## Sandbox Helpers
+
+The following names are injected into every Run automatically — you do not need to define or import them:
+
+| Name | What it provides |
+|---|---|
+| `SAMPLE_PDF` | Absolute path to the bundled HR handbook PDF |
+| `MODE` | Current LLM mode string (`"openai"`, `"claude"`, or `"mock"`) |
+| `get_embeddings(MODE)` | `OpenAIEmbeddings` in OpenAI mode; FastEmbed ONNX model otherwise |
+| `make_vectorstore(chunks, embeddings)` | Builds a real ChromaDB `EphemeralClient` collection; falls back to `InMemoryVectorStore` if chromadb is unavailable |
+| `get_chat_model(MODE)` | `ChatOpenAI`, `ChatAnthropic`, or local Mock model |
+
+## Task 1 — Load the PDF
+
+Use LangChain's `PyPDFLoader` to load `SAMPLE_PDF` and assign the result to `documents`. The loader returns one `Document` object per page.
+
+```python
+from langchain_community.document_loaders import PyPDFLoader
+
+loader = PyPDFLoader(SAMPLE_PDF)
+documents = loader.load()
+
+print("Number of pages:", len(documents))
+print("First page metadata:", documents[0].metadata)
+print(documents[0].page_content[:200])
+```
+
+<Accordion title="Grading criteria for Task 1 (5 pts)">
+  | Criterion | Points | What is checked |
+  |---|---|---|
+  | `import` | 3 | `from langchain_community.document_loaders import PyPDFLoader` present in source |
+  | `create` | 3 | `PyPDFLoader(SAMPLE_PDF` call detected |
+  | `load` | 2 | `.load()` called |
+  | `inspect` | 2 | `len(documents` printed |
+</Accordion>
+
+## Task 2 — Split the Document into Chunks
+
+Split `documents` into overlapping chunks using `RecursiveCharacterTextSplitter`. The fixed settings are `chunk_size=1000` and `chunk_overlap=200`.
+
+```python
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+chunk_size = 1000
+chunk_overlap = 200
+splitter = RecursiveCharacterTextSplitter(
+    chunk_size=chunk_size, chunk_overlap=chunk_overlap,
+)
+chunks = splitter.split_documents(documents)
+print("Number of chunks:", len(chunks))
+```
+
+<Accordion title="Grading criteria for Task 2 (20 pts)">
+  | Criterion | Points | What is checked |
+  |---|---|---|
+  | `import` | 3 | `import RecursiveCharacterTextSplitter` present |
+  | `build` | 4 | Constructor called with `chunk_size` argument |
+  | `split` | 3 | `split_documents(documents` called |
+</Accordion>
+
+## Task 3 — Generate Embeddings and Store in ChromaDB
+
+Embed the chunks using `get_embeddings(MODE)` and build a real vector store with `make_vectorstore()`. Then run a `similarity_search` to confirm retrieval works.
+
+```python
+embeddings = get_embeddings(MODE)
+vectorstore = make_vectorstore(chunks, embeddings)
+
+query = "How many casual leave days are provided each year?"
+results = vectorstore.similarity_search(query, k=3)
+for i, doc in enumerate(results):
+    print(f"--- match {i + 1} (page {doc.metadata.get('page', '?')}) ---")
+    print(doc.page_content[:200])
+```
+
+<Accordion title="Grading criteria for Task 3 (25 pts)">
+  | Criterion | Points | What is checked |
+  |---|---|---|
+  | `embed` | 4 | `get_embeddings(MODE` called |
+  | `store` | 4 | `make_vectorstore(chunks` called |
+  | `search` | 2 | `similarity_search(` with `k=3` |
+</Accordion>
+
+## Task 4 — Build the RAG Question-Answering Pipeline
+
+Create a retriever from the vector store, build a `ChatPromptTemplate` that instructs the model to answer **only** from retrieved context, and invoke it on a real question. The exact refusal sentence must appear in your prompt.
+
+```python
+from langchain_core.prompts import ChatPromptTemplate
+
+retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
+llm = get_chat_model(MODE)
+
+prompt = ChatPromptTemplate.from_template(
+    """Answer the question using ONLY the context below. Do not use outside knowledge.
+If the answer is not in the context, reply exactly:
+"I could not find the answer in the provided document."
+
+Context:
+{context}
+
+Question:
+{question}
+
+Answer:"""
+)
+
+question = "What is the standard notice period for regular full-time employees?"
+docs = retriever.invoke(question)
+context = "\n\n".join(d.page_content for d in docs)
+resp = llm.invoke(prompt.format_messages(context=context, question=question))
+
+print("Answer:", resp.content)
+print("Pages:", sorted({d.metadata.get("page", "?") for d in docs}))
+```
+
+<Warning>
+  The grader checks for the exact string `"I could not find the answer in the provided document."` inside your prompt. Paraphrasing it will fail the `grounding` criterion.
+</Warning>
+
+<Accordion title="Grading criteria for Task 4 (25 pts)">
+  | Criterion | Points | What is checked |
+  |---|---|---|
+  | `retriever` | 3 | `as_retriever(` called |
+  | `k3` | 2 | `k` set to `3` |
+  | `model` | 3 | `get_chat_model(MODE` called |
+  | `grounding` | 3 | Exact refusal sentence present in source |
+  | `invoke` | 2 | `llm.invoke` or `chain.invoke` called |
+</Accordion>
+
+## Task 5 — Build an Interactive RAG Loop
+
+Wrap Task 4's logic into `def answer(question)` returning `(text, pages)`, then add a `while True` loop that reads from `input()` and breaks on `"exit"`.
+
+```python
+def answer(question):
+    docs = retriever.invoke(question)
+    context = "\n\n".join(d.page_content for d in docs)
+    resp = llm.invoke(prompt.format_messages(context=context, question=question))
+    pages = sorted({d.metadata.get("page", "?") for d in docs})
+    return resp.content.strip(), pages
+
+while True:
+    q = input("Question> ").strip()
+    if not q:
+        continue
+    if q.lower() == "exit":
+        break
+    text, pages = answer(q)
+    print("A:", text)
+    print("pages:", pages)
+```
+
+<Tip>
+  Reuse `retriever`, `llm`, and `prompt` from Task 4 — do not rebuild them inside `answer()`. The grader checks that `retriever.invoke` is called inside the function.
+</Tip>
+
+<Accordion title="Grading criteria for Task 5 (25 pts)">
+  | Criterion | Points | What is checked |
+  |---|---|---|
+  | `func` | 3 | `def answer(` defined with a `return` statement |
+  | `loop` | 3 | `while True` present |
+  | `exit` | 2 | Stops on `"exit"` (checks `== 'exit'` or `.lower()`) |
+  | `reuse` | 2 | `retriever.invoke` called inside the function |
+</Accordion>
+
+## Grading Rubric Summary
+
+The RAG lab uses criterion-based grading. Every criterion is evaluated independently by AST inspection of your source **and** by running Tasks 1…N in sequence and examining the real objects produced.
+
+<Info>
+  Enable **🔧 Developer mode** (`?dev=1`) to see each criterion's pass/fail, points, reason string, and the exact source the grader inspected.
+</Info>

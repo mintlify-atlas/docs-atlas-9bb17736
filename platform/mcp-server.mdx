@@ -1,0 +1,182 @@
+---
+title: "Bundled MCP Server: Tools and Resources over stdio"
+sidebarTitle: "MCP Server"
+description: "mcp_server.py is a real FastMCP stdio server spawned as a subprocess by Lab 5. It exposes three tools and one resource via the Model Context Protocol."
+---
+
+The platform ships a self-contained MCP server (`mcp_server.py`) that Lab 5 uses as a live backend for the Model Context Protocol exercises. It is a real `FastMCP` application from the `mcp` library — not a simulation — and communicates with the host process over JSON-RPC on stdio. When a learner's Lab 5 code instantiates `MultiServerMCPClient` using the config from `sandbox.mcp_stdio_config()`, the platform spawns this file as a subprocess, and the client negotiates the MCP handshake automatically. The server exposes three callable tools and one readable resource, all relevant to the HR policy knowledge base used throughout the labs.
+
+## How It Is Launched
+
+The sandbox helper `mcp_stdio_config()` returns the subprocess config dict that `langchain-mcp-adapters`' `MultiServerMCPClient` expects:
+
+```python
+config = mcp_stdio_config("sandbox")
+# Returns:
+# {
+#   "sandbox": {
+#     "command": "/usr/bin/python3",       # same interpreter as the host process
+#     "args": ["/app/mcp_server.py"],      # absolute path via MCP_SERVER_PATH
+#     "transport": "stdio"
+#   }
+# }
+```
+
+Using the same Python interpreter (`sys.executable`) ensures the subprocess inherits the same virtual environment and installed packages. No separate install step is required.
+
+```python
+from langchain_mcp_adapters.client import MultiServerMCPClient
+from sandbox import mcp_stdio_config
+
+async with MultiServerMCPClient(mcp_stdio_config()) as client:
+    tools = client.get_tools()   # → [add, multiply, leave_allowance]
+```
+
+<Note>
+  The `mcp` package (specifically `mcp.server.fastmcp`) must be installed. It is listed in `requirements-full.txt` but not in the minimal `requirements.txt`. If you are deploying the platform and plan to use Lab 5, install from `requirements-full.txt`.
+</Note>
+
+## Exposed Tools
+
+The server registers three tools via `@mcp.tool()`. Each tool is a plain Python function; the FastMCP decorator handles JSON-RPC dispatch, argument validation, and result serialization automatically.
+
+### `add`
+
+<ParamField path="a" type="float">
+  The first operand.
+</ParamField>
+<ParamField path="b" type="float">
+  The second operand.
+</ParamField>
+
+<ResponseField name="return" type="float">
+  The arithmetic sum `a + b`.
+</ResponseField>
+
+```python
+# MCP tool call
+add(a=3.5, b=1.5)   # → 5.0
+```
+
+---
+
+### `multiply`
+
+<ParamField path="a" type="float">
+  The first operand.
+</ParamField>
+<ParamField path="b" type="float">
+  The second operand.
+</ParamField>
+
+<ResponseField name="return" type="float">
+  The product `a * b`.
+</ResponseField>
+
+```python
+multiply(a=6.0, b=7.0)   # → 42.0
+```
+
+---
+
+### `leave_allowance`
+
+Returns the annual leave-day entitlement for a given leave type from the HR policy table.
+
+<ParamField path="kind" type="str">
+  The leave category. Case-insensitive; leading/trailing whitespace is stripped before lookup. Valid values:
+
+  | `kind` | Return value |
+  |---|---|
+  | `casual` | `"12 days"` |
+  | `sick` | `"10 days"` |
+  | `earned` | `"18 days"` |
+
+  Any other value returns `"unknown leave type: '<kind>'"`.
+</ParamField>
+
+<ResponseField name="return" type="str">
+  A human-readable string describing the annual entitlement for the requested leave type.
+</ResponseField>
+
+```python
+leave_allowance(kind="casual")   # → "12 days"
+leave_allowance(kind="Earned")   # → "18 days"  (case-insensitive)
+leave_allowance(kind="paternity") # → "unknown leave type: 'paternity'"
+```
+
+## Exposed Resource
+
+Resources in MCP are named, readable data items — analogous to a REST GET endpoint. The server exposes one resource at the URI `policy://notice-period`.
+
+### `policy://notice-period`
+
+<ResponseField name="URI" type="string">
+  `policy://notice-period`
+</ResponseField>
+
+<ResponseField name="return" type="str">
+  `"60 calendar days"` — the standard notice period for regular full-time employees, sourced from the HR policy knowledge base.
+</ResponseField>
+
+```python
+# Reading the resource through MultiServerMCPClient
+content = await client.read_resource("policy://notice-period")
+# → "60 calendar days"
+```
+
+## Standalone Testing
+
+You can launch the server directly from the command line to verify it starts correctly. It will block, waiting on stdin for JSON-RPC messages, and can be terminated with `Ctrl+C`:
+
+```bash
+python mcp_server.py
+```
+
+This is useful for checking that the `mcp` package is installed and that FastMCP can initialize without errors before deploying the full lab environment.
+
+## Full Source
+
+The complete `mcp_server.py` source is reproduced below for reference:
+
+```python
+"""Bundled MCP server (stdio transport) used by the MCP practical lab.
+
+The MCP lab spawns THIS file as a real subprocess and talks to it over the
+Model Context Protocol (JSON-RPC on stdio) via `langchain-mcp-adapters`.
+
+Run it standalone to sanity-check:  python mcp_server.py   (it will wait on stdio)
+"""
+from mcp.server.fastmcp import FastMCP
+
+mcp = FastMCP("sandbox-tools")
+
+
+@mcp.tool()
+def add(a: float, b: float) -> float:
+    """Add two numbers."""
+    return a + b
+
+
+@mcp.tool()
+def multiply(a: float, b: float) -> float:
+    """Multiply two numbers."""
+    return a * b
+
+
+@mcp.tool()
+def leave_allowance(kind: str) -> str:
+    """Annual leave-day allowance for a leave type: 'casual', 'sick', or 'earned'."""
+    table = {"casual": "12 days", "sick": "10 days", "earned": "18 days"}
+    return table.get(kind.strip().lower(), f"unknown leave type: {kind!r}")
+
+
+@mcp.resource("policy://notice-period")
+def notice_period() -> str:
+    """The standard notice period for regular full-time employees."""
+    return "60 calendar days"
+
+
+if __name__ == "__main__":
+    mcp.run(transport="stdio")
+```

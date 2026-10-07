@@ -1,0 +1,168 @@
+---
+title: "Lab 3: Build a LangGraph ReAct Agent"
+sidebarTitle: "Lab 3: Agent"
+description: "Use LangGraph's create_react_agent to build a ReAct agent, customize it with a persona, stream its steps, inspect the graph, and extend it with a custom tool."
+---
+
+Lab 3 moves from the manual tool loop of Lab 2 to an autonomous ReAct agent built with LangGraph's `create_react_agent`. The agent manages the `model → tools → model → …` cycle on its own — you just give it a model, a list of tools, and a question. Each task then extends the baseline agent: you add a persona, watch it stream step by step, visualise the underlying state graph as ASCII art, and finally attach your own `@tool` alongside the built-in ones.
+
+<Warning>
+  This lab requires **OpenAI or Claude mode**. `create_react_agent` needs a real tool-calling model to decide which tools to invoke at each step. Set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` before starting.
+</Warning>
+
+<Note>
+  `langgraph` is included in `requirements-full.txt`. If you see `ModuleNotFoundError: langgraph`, install that file locally with `pip install -r requirements-full.txt`.
+</Note>
+
+## Lab Overview
+
+`create_react_agent` from `langgraph.prebuilt` compiles a real `StateGraph` with two nodes — `agent` (the LLM) and `tools` (tool executor) — connected by a conditional edge. You never write the loop yourself.
+
+```text
+goal ─▶ [ agent node ⇄ tools node ]  autonomous loop ─▶ final answer + full trace
+```
+
+| Task | Step | Key piece |
+|------|------|-----------|
+| T1 | Build & run | `create_react_agent(model, tools)` → `.invoke({"messages": [...]})` |
+| T2 | Give it a persona | `prompt=` system string |
+| T3 | Stream its steps | `agent.stream(..., stream_mode="values")` |
+| T4 | Inspect the graph | `agent.get_graph().draw_ascii()` |
+| T5 | Add a custom tool | `@tool` decorator + `[*get_tools(), my_tool]` |
+
+## Task 1 — Build and Run a ReAct Agent
+
+Import `create_react_agent`, pass it the chat model and all tools, and invoke it. The returned `result["messages"]` list contains the full trace: the initial `HumanMessage`, any `AIMessage` tool-call requests, `ToolMessage` responses, and the final `AIMessage` answer.
+
+```python
+from langgraph.prebuilt import create_react_agent
+
+agent = create_react_agent(get_chat_model(MODE), get_tools())
+q = "How many earned leave days do employees get, and what is that number times 3?"
+result = agent.invoke({"messages": [{"role": "user", "content": q}]})
+for m in result["messages"]:
+    m.pretty_print()
+```
+
+<Accordion title="Grading criteria for Task 1">
+  | Criterion | Points | What is checked |
+  |---|---|---|
+  | `import` | 3 | `from langgraph.prebuilt import create_react_agent` |
+  | `build` | 4 | `create_react_agent(get_chat_model(MODE), get_tools` called |
+  | `invoke` | 3 | `.invoke({"messages":` called |
+</Accordion>
+
+## Task 2 — Give the Agent a Persona
+
+Pass a `prompt=` string to `create_react_agent` to set a system instruction. The string is prepended as a system message to every turn of the conversation.
+
+```python
+from langgraph.prebuilt import create_react_agent
+
+SYSTEM = "You are a terse HR assistant. Always state the exact number you looked up."
+agent = create_react_agent(get_chat_model(MODE), get_tools(), prompt=SYSTEM)
+q = "How many earned leave days do employees get, and what is that number times 3?"
+result = agent.invoke({"messages": [{"role": "user", "content": q}]})
+print(result["messages"][-1].content)
+```
+
+<Accordion title="Grading criteria for Task 2">
+  | Criterion | Points | What is checked |
+  |---|---|---|
+  | `prompt` | 6 | `create_react_agent(` called with `prompt=` argument |
+  | `run` | 4 | `.invoke(` called |
+</Accordion>
+
+## Task 3 — Watch It Think (Stream)
+
+Use `agent.stream()` with `stream_mode="values"` to receive the graph state after every node execution. Printing `step["messages"][-1].pretty_print()` shows each message as it arrives, letting you follow the reasoning chain in real time.
+
+```python
+from langgraph.prebuilt import create_react_agent
+
+agent = create_react_agent(get_chat_model(MODE), get_tools())
+q = "What is 4321 divided by 7, rounded? Then look up the sick leave allowance."
+for step in agent.stream(
+    {"messages": [{"role": "user", "content": q}]},
+    stream_mode="values",
+):
+    step["messages"][-1].pretty_print()
+```
+
+<Accordion title="Grading criteria for Task 3">
+  | Criterion | Points | What is checked |
+  |---|---|---|
+  | `stream` | 6 | `.stream(` called on the agent |
+  | `mode` | 4 | `stream_mode="values"` set |
+</Accordion>
+
+## Task 4 — Inspect the Graph
+
+`agent.get_graph()` returns the compiled `StateGraph` object. Call `.draw_ascii()` to render it as text art and `.nodes` to list the node names. You'll see the `__start__`, `agent`, and `tools` nodes and the conditional edge between them.
+
+```python
+from langgraph.prebuilt import create_react_agent
+
+agent = create_react_agent(get_chat_model(MODE), get_tools())
+g = agent.get_graph()
+print(g.draw_ascii())
+print("nodes:", list(g.nodes))
+```
+
+Example output:
+
+```text
+        +-----------+
+        | __start__ |
+        +-----------+
+               *
+               *
+               *
+          +-------+
+          | agent |
+          +-------+
+         ...     ...
+        .             .
+       .               .
++-------+          +---------+
+| tools |          | __end__ |
++-------+          +---------+
+```
+
+<Accordion title="Grading criteria for Task 4">
+  | Criterion | Points | What is checked |
+  |---|---|---|
+  | `graph` | 6 | `get_graph()` called |
+  | `draw` | 4 | `.draw_ascii()` or `.nodes` accessed |
+</Accordion>
+
+## Task 5 — Add Your Own Tool
+
+Define a new tool with the `@tool` decorator and add it alongside the built-in tools using `[*get_tools(), your_tool]`. The docstring becomes the tool's description; the typed parameters become its argument schema.
+
+```python
+from langchain_core.tools import tool
+from langgraph.prebuilt import create_react_agent
+
+@tool
+def days_to_hours(days: int) -> int:
+    """Convert a number of working days to hours (8h per day)."""
+    return days * 8
+
+agent = create_react_agent(get_chat_model(MODE), [*get_tools(), days_to_hours])
+q = "How many casual leave days are there, and how many working hours is that?"
+result = agent.invoke({"messages": [{"role": "user", "content": q}]})
+print(result["messages"][-1].content)
+```
+
+<Tip>
+  The `@tool` decorator from `langchain_core.tools` automatically builds the JSON schema from your function's type annotations and docstring. Always include a one-line docstring — without it the model has no description to decide when to call your tool.
+</Tip>
+
+<Accordion title="Grading criteria for Task 5">
+  | Criterion | Points | What is checked |
+  |---|---|---|
+  | `tool` | 4 | `@tool` decorator with a `def` below it |
+  | `add` | 4 | `[*get_tools(),` pattern used to extend the tool list |
+  | `run` | 2 | `.invoke(` called |
+</Accordion>

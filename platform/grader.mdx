@@ -1,0 +1,199 @@
+---
+title: "Grading Engine: AST Analysis and Runtime Inspection"
+sidebarTitle: "Grader"
+description: "grader.py grades learner code with AST analysis and live namespace inspection — checking actual arguments, real objects, and LLM-generated output, not just keywords."
+---
+
+The grading engine (`grader.py`) evaluates learner-submitted code against a rubric of independent, named criteria. Unlike keyword-matching or substring-search approaches, every criterion performs a targeted structural or behavioral check: did the learner call `RecursiveCharacterTextSplitter` with `chunk_size=1000` (not 500)? At runtime, does `similarity_search` return exactly 3 `Document` objects? Is the final answer actually produced by an LLM call, or is it a hardcoded string? Each check returns a `(passed, reason)` tuple so learners receive specific, actionable feedback rather than a binary pass/fail.
+
+## Design Philosophy
+
+The grader uses two complementary analysis strategies for each criterion:
+
+<CardGroup cols={2}>
+  <Card title="AST Analysis" icon="code">
+    Parses the learner's source with `ast.parse()` and inspects the resulting tree. Checks whether a specific function was called, which arguments were passed, whether a literal equals the expected value, and whether a required import is present — all without executing the code.
+  </Card>
+  <Card title="Runtime Inspection" icon="play">
+    Executes the accumulated source (all tasks up to and including the current one) in an isolated namespace using `exec()`. Inspects the live namespace to verify that `documents` is a non-empty list of `Document` objects, that `similarity_search` returned 3 hits, or that the answer string shares tokens with the retrieved context.
+  </Card>
+</CardGroup>
+
+The two strategies are complementary: AST checks catch structural mistakes before the code ever runs (useful when execution would fail or take a long time), while runtime checks catch semantic errors that look syntactically correct but produce wrong values.
+
+<Tip>
+  Pass `dev=True` to `grade_task()` to include `_source` (the full assembled source string) and `_run_output` (captured stdout/stderr) in the response dict. This makes it straightforward to debug criterion failures and trace exactly what the grader executed.
+</Tip>
+
+## Public API
+
+### `grade_task`
+
+The primary entry point. Grades a single task's submitted code against the registered criteria for that `(lab_id, task_id)` pair.
+
+<ParamField path="task_id" type="int">
+  1-based task number within the lab (e.g. `2` for Task 2 of the RAG lab).
+</ParamField>
+<ParamField path="learner_code" type="str">
+  The raw Python source the learner submitted for this task — just their code, without the sandbox preamble. The grader parses this for AST checks.
+</ParamField>
+<ParamField path="lab_id" type="str" default="01-rag">
+  Identifier matching the `content/` directory name (e.g. `"01-rag"`, `"02-tool-calling"`). Selects which criteria table to apply.
+</ParamField>
+<ParamField path="accumulated_source" type="str | None" optional>
+  The full assembled source string — preamble plus all tasks from Task 1 through the current task, as produced by `assemble_source()`. When provided, the grader executes it to obtain a live namespace for runtime criteria. If `None`, runtime criteria are skipped (AST-only grading).
+</ParamField>
+<ParamField path="mode" type="str" default="mock">
+  The active sandbox mode (`"openai"`, `"claude"`, or `"mock"`). Stored in the grading context so mode-aware criteria can adjust their expectations.
+</ParamField>
+<ParamField path="dev" type="bool" default="false">
+  If `True`, includes `_source` and `_run_output` keys in the returned dict. Useful for platform developers debugging criterion logic.
+</ParamField>
+
+<ResponseField name="return" type="dict">
+  A structured result dict with the following shape:
+
+  ```json
+  {
+    "task_id": 2,
+    "lab_id": "01-rag",
+    "score": 12.0,
+    "max_score": 20,
+    "runtime": {
+      "executed": true,
+      "error": null
+    },
+    "criteria": [
+      {
+        "name": "chunk_size_1000",
+        "points": 4,
+        "earned": 0,
+        "passed": false,
+        "reason": "splitter called with chunk_size=500, not 1000"
+      }
+    ]
+  }
+  ```
+</ResponseField>
+
+The `runtime.executed` flag is `true` only when `accumulated_source` was provided and no exception escaped from `exec()`. The `runtime.error` field contains the last line of the traceback if execution failed, or `null` on success.
+
+---
+
+### `has_criteria`
+
+Checks whether hand-written criteria exist for a given `(lab_id, task_id)` pair before calling `grade_task()`.
+
+<ParamField path="lab_id" type="str">
+  Lab identifier, e.g. `"01-rag"`.
+</ParamField>
+<ParamField path="task_id" type="int">
+  1-based task number.
+</ParamField>
+
+<ResponseField name="return" type="bool">
+  `True` if `LAB_CRITERIA[lab_id][task_id]` exists. `False` causes the caller (the Streamlit app) to fall back to regex-based checks from the lab's `practice.yaml`.
+</ResponseField>
+
+```python
+if grader.has_criteria(lab_id, task_id):
+    result = grader.grade_task(task_id, code, lab_id=lab_id,
+                               accumulated_source=full_source, mode=mode)
+else:
+    # fall back to regex checks defined in practice.yaml
+    ...
+```
+
+---
+
+### `assemble_source`
+
+Concatenates the preamble and all task code blocks into a single executable string, exactly as the **Run** button does.
+
+<ParamField path="task_codes" type="list[str]">
+  Ordered list of raw code strings for each task, from Task 1 through the current task. Each entry is wrapped in a `# ===== Task N =====` header comment.
+</ParamField>
+<ParamField path="mode" type="str">
+  Active mode string injected into the preamble via `os.environ['SANDBOX_MODE']`.
+</ParamField>
+
+<ResponseField name="return" type="str">
+  A single Python source string: the sandbox preamble (imports, mode setup) followed by each task's code block in order. Passing this string to `grade_task(accumulated_source=...)` gives the grader a complete, executable snapshot of the learner's progress.
+</ResponseField>
+
+```python
+full_source = assemble_source(
+    task_codes=["documents = PyPDFLoader(SAMPLE_PDF).load()", "chunks = split_docs(documents)"],
+    mode="mock"
+)
+```
+
+## Legacy Fallback
+
+Labs without hand-written criteria (currently everything except `01-rag`) fall back to the regex-based `check_answer` logic defined in each task's `practice.yaml`. The Streamlit app calls `has_criteria()` first; only when it returns `True` does it invoke `grade_task()`. This means new labs can be deployed with YAML-only grading and upgraded to criterion-based grading incrementally.
+
+<Warning>
+  Regex fallback checks only verify that certain tokens appear in the submitted source. They cannot confirm that a function was called with the correct arguments, that a runtime object has the right type, or that the LLM actually generated the answer. Criterion-based grading is always more accurate.
+</Warning>
+
+## RAG Lab Criteria Reference
+
+All five RAG lab tasks have hand-written criteria registered in `RAG_CRITERIA`. The table below lists every criterion, what it checks, and its point value.
+
+### Task 1 — Document Loading (5 pts total)
+
+| Criterion | What it checks | Points |
+|---|---|---|
+| `loader_imported` | A PDF loader class (e.g. `PyPDFLoader`) is imported from `langchain_community.document_loaders`. Non-PDF loaders like `TextLoader` fail this check. | 1 |
+| `loader_called_with_pdf_path` | The PDF loader is instantiated with `SAMPLE_PDF` or a string path ending in `.pdf`. Importing a loader without calling it scores 0. | 2 |
+| `documents_actually_loaded` | `documents` is assigned from a `.load()` call, not set to `[]` or `None`. At runtime, verifies `documents` is a non-empty list of `Document` objects. | 2 |
+
+### Task 2 — Text Splitting (20 pts total)
+
+| Criterion | What it checks | Points |
+|---|---|---|
+| `splitter_created` | A `*TextSplitter` class is instantiated. Warns (but passes) if something other than `RecursiveCharacterTextSplitter` is used. | 3 |
+| `chunk_size_1000` | The splitter is called with `chunk_size=1000` (literal or resolved variable). Fails if the value is anything else (e.g. 500). | 4 |
+| `chunk_overlap_200` | The splitter is called with `chunk_overlap=200`. Checks positional or keyword argument. | 4 |
+| `documents_split` | `split_documents(documents)` is called and its result is stored in `chunks`. At runtime, confirms `chunks` is non-empty and larger than `documents`. | 5 |
+| `chunk_count_reported` | `print(... len(chunks) ...)` appears in the code. Printing `len(documents)` instead fails this criterion. | 4 |
+
+### Task 3 — Embeddings and Vector Store (25 pts total)
+
+| Criterion | What it checks | Points |
+|---|---|---|
+| `embeddings_created` | An embeddings object is created via `get_embeddings()`, `OpenAIEmbeddings()`, or any `*Embeddings` class. `embeddings = None` fails. | 5 |
+| `embedding_model_correct` | `get_embeddings(MODE)` is called (sandbox selects the right model), or `OpenAIEmbeddings(model='text-embedding-3-small')` is used explicitly. | 4 |
+| `vectorstore_created` | `make_vectorstore()` or `Chroma.from_documents()` is called and the result stored in `vectorstore`. At runtime, confirms `.similarity_search` exists on the object. | 6 |
+| `chunks_indexed` | The vector store call receives `chunks` as its first argument. Passing `documents` (raw pages) instead fails. | 4 |
+| `similarity_search_k3` | `.similarity_search(...)` is called with `k=3`. The default `k=4` fails this check. | 4 |
+| `top3_results_obtained` | At runtime, a variable named `results`, `docs`, `hits`, or `matches` contains exactly 3 `Document` objects. | 2 |
+
+### Task 4 — RAG Chain (25 pts total)
+
+| Criterion | What it checks | Points |
+|---|---|---|
+| `retriever_created` | `vectorstore.as_retriever(...)` is called (or `similarity_search` is used directly as a retrieval mechanism). | 4 |
+| `retrieval_k_is_3` | Retriever is configured with `search_kwargs={'k': 3}`, or `similarity_search` is called with `k=3`. | 3 |
+| `llm_created` | `get_chat_model(MODE)`, `ChatOpenAI(...)`, or `ChatAnthropic(...)` is instantiated. `llm = None` fails. | 3 |
+| `prompt_is_grounded` | The `ChatPromptTemplate.from_template(...)` string contains `{context}`, `{question}`, **and** the exact refusal sentence ("could not find the answer in the provided document"). | 3 |
+| `retrieval_executed` | `retriever.invoke(...)` or `similarity_search(...)` is actually called. At runtime, confirms that a variable holding retrieved documents exists. | 3 |
+| `context_built_from_docs` | A variable is assembled from the retrieved documents' `.page_content` fields (e.g. via `"\n".join(d.page_content for d in docs)`). A hardcoded `context = "..."` string fails. | 3 |
+| `context_passed_to_llm` | `llm.invoke(...)` or `chain.invoke(...)` receives the assembled context variable (directly or via `prompt.format_messages(context=...)`). | 3 |
+| `answer_generated_by_llm` | `resp` / `answer` / `response` is assigned from an `.invoke(...)` call. At runtime, confirms the response object has a `.content` attribute and that the content shares tokens with the retrieved context (grounding heuristic). | 3 |
+
+### Task 5 — Interactive Q&A Loop (25 pts total)
+
+| Criterion | What it checks | Points |
+|---|---|---|
+| `answer_function_defined` | `def answer(question):` exists with a real body (not just `...` or `pass`) and at least one `return` statement with a value. | 4 |
+| `answer_retrieves` | Inside `answer()`, `retriever.invoke(...)` or `.similarity_search(...)` is called. | 4 |
+| `answer_invokes_llm_with_context` | Inside `answer()`, `llm.invoke(...)` or `chain.invoke(...)` is called AND context is assembled from `.page_content` fields. | 5 |
+| `interactive_while_loop` | A `while True:` (or `while true`) loop exists in the top-level code and contains an `input(...)` call. | 4 |
+| `reads_user_input` | `input()` is called at least once anywhere in the code (inside or outside the loop). | 2 |
+| `stops_on_exit` | The loop contains a `break` statement guarded by a comparison against `"exit"` or `"quit"`. | 3 |
+| `loop_calls_answer` | Inside the `while True:` loop body, `answer(...)` is called. | 3 |
+
+## Execution and Caching
+
+The grader executes accumulated source in an isolated `exec()` namespace (`__name__ == "__grader__"`). To avoid re-running expensive operations (embeddings, LLM calls) when multiple criteria for the same task are graded in sequence, the namespace is cached by SHA-1 hash of the source string in `_NS_CACHE` (capped at 24 entries, LRU eviction). Simulated user input is pre-seeded with `["What is the standard notice period?", "How many casual leave days?", "exit", ...]` to safely terminate any interactive `while True:` loop without hanging.

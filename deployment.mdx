@@ -1,0 +1,290 @@
+---
+title: "Deploy GenAI Lab: Cloud, Docker, and Local Options"
+sidebarTitle: "Deployment"
+description: "Deploy GenAI Lab to Streamlit Community Cloud, Docker/Compose, Render, Railway, or Fly.io — with API key secrets and Python version requirements."
+---
+
+GenAI Lab ships as a standard Streamlit app (`streamlit_app.py`) and supports several deployment targets — from a free Streamlit Community Cloud instance to a Docker container on any cloud VM. The key constraint across all targets is **Python 3.12**: the full dependency stack (`chromadb`, `onnxruntime`, `fastembed`) ships prebuilt wheels only for cp312, and Python 3.13 will fail at the compile stage. Pick the tab below that matches your target environment.
+
+<Warning>
+  **Python 3.12 is required.** Building under Python 3.13 causes hard failures while compiling native extensions (`ormsgpack`, `py-rust-stemmers`, `chroma-hnswlib`). Always set the Python version explicitly in your platform's settings — do not rely on a default.
+</Warning>
+
+<Tabs>
+  <Tab title="Streamlit Cloud">
+    Streamlit Community Cloud is the quickest zero-infrastructure path. The free tier supports Labs 1–2 using the lean `requirements.txt`; Labs 3–5 need the full stack, which requires the paid tier or a container.
+
+    <Steps>
+      <Step title="Prepare the repository">
+        Place the contents of `GenAIPracticePlatform8th/` at your repository root so `streamlit_app.py` and `requirements.txt` are at the top level. This is the folder that Streamlit Cloud builds.
+
+        ```bash
+        # Example: copy platform files to repo root
+        cp -r GenAIPracticePlatform8th/* .
+        git add -A
+        git commit -m "deploy: move platform to repo root"
+        git push
+        ```
+
+        Verify that the root contains these files before deploying:
+
+        ```text
+        streamlit_app.py
+        grader.py
+        sandbox.py
+        mcp_server.py
+        requirements.txt
+        content/
+        ```
+      </Step>
+
+      <Step title="Create the app on share.streamlit.io">
+        1. Go to [share.streamlit.io](https://share.streamlit.io) and click **Create app**.
+        2. Select your repository and the `main` branch.
+        3. Set **Main file path** to `streamlit_app.py`.
+        4. Open **Advanced settings** and set **Python version** to **3.12**.
+        5. Click **Deploy**.
+
+        <Note>
+          Do **not** add a `runtime.txt` or `.python-version` file to the repo. Streamlit Community Cloud reads the Python version from **Advanced settings**, not from those files. A `runtime.txt` with Heroku-format content (`python-3.12`) can trigger a `uv python install` step that causes a non-zero exit and a misleading build failure.
+        </Note>
+      </Step>
+
+      <Step title="Add API key secrets (optional)">
+        After the app deploys, open **Manage app → Settings → Secrets** and add your key:
+
+        ```toml
+        OPENAI_API_KEY = "sk-..."
+        # or
+        ANTHROPIC_API_KEY = "sk-ant-..."
+        ```
+
+        Without a key, the app starts in **Mock mode** and Labs 1 and 5 tasks 1–3 run fully. Real LLM mode and Labs 2–4 become available once a valid key is present.
+      </Step>
+    </Steps>
+
+    ### What works on the lean `requirements.txt`
+
+    The Community Cloud free tier builds only the lean set. The app degrades gracefully:
+
+    | Lab | On lean `requirements.txt` |
+    |-----|---------------------------|
+    | 1 · RAG | **Full** — `InMemoryVectorStore` instead of ChromaDB; OpenAI embeddings or built-in `DeterministicFakeEmbedding` in Mock mode |
+    | 2 · Tool Calling | **Full** |
+    | 3–5 · LangGraph / Multi-Agent / MCP | Blocked on Run with a clear message — need `requirements-full.txt` |
+    | Grading engine + Excel export + all LLM modes | Unaffected |
+
+    ### Troubleshooting
+
+    <Accordion title="'installer returned a non-zero exit code' in the build log">
+      This error comes from the Streamlit Cloud wrapper around pip, not from pip itself. Two causes:
+
+      1. **Wrong Python version** — the build ran on 3.13, which cannot compile native wheels. Set **Python 3.12** in Advanced settings and click **Reboot app**.
+      2. **`runtime.txt` or `.python-version` present in the built folder** — remove these files from the repo. They conflict with the uv-based builder on Community Cloud.
+    </Accordion>
+
+    <Accordion title="Build fails with OOM / killed process">
+      The free-tier build ran out of memory unpacking `chromadb` + `onnxruntime` + `fastembed` + `langgraph` together. Use the lean `requirements.txt` (no ChromaDB, no LangGraph, no FastEmbed) for Community Cloud free tier. For the full stack, use a paid tier, Render, Railway, or a Docker container.
+    </Accordion>
+
+    <Accordion title="ModuleNotFoundError: chromadb / mcp at runtime">
+      The deployed folder's `requirements.txt` is an old copy that predates the lean/full split. Replace it with the current `requirements.txt` from this repo, commit, and reboot.
+    </Accordion>
+
+    <Accordion title="Run: OpenAIAuthenticationError 401">
+      The API key in **Manage app → Settings → Secrets** is invalid or expired. Update `OPENAI_API_KEY` with a valid key and reboot.
+    </Accordion>
+
+    <Accordion title="MCP lab: FileNotFoundError on the server">
+      `mcp_server.py` must be at the repo root next to `streamlit_app.py`. If you deployed from a subfolder, move both files to the same directory and update **Main file path**.
+    </Accordion>
+  </Tab>
+
+  <Tab title="Docker / Compose">
+    Docker is the recommended path for running the **full** lab stack (Labs 1–5) with ChromaDB, LangGraph, and FastEmbed all available. The JupyterLab variant also ships as a Compose service — see the [JupyterLab overview](/jupyter/overview) for that image.
+
+    ### docker compose (recommended)
+
+    A `docker-compose.yml` in the `GenAILabJupyter/` folder defines a ready-to-run service. From the repo root:
+
+    ```bash
+    docker compose -f GenAILabJupyter/docker-compose.yml up --build
+    ```
+
+    Pass API keys as environment variables — never bake them into the image:
+
+    ```bash
+    OPENAI_API_KEY=sk-... docker compose -f GenAILabJupyter/docker-compose.yml up --build
+    ```
+
+    Or use a `.env` file in the same directory as `docker-compose.yml`:
+
+    ```bash
+    # .env
+    OPENAI_API_KEY=sk-...
+    ANTHROPIC_API_KEY=sk-ant-...
+    ```
+
+    <Note>
+      Never commit `.env` files or bake API keys into a `Dockerfile`. Always pass secrets at runtime via environment variables, Docker secrets, or your platform's secret manager.
+    </Note>
+
+    ### docker run (Streamlit only)
+
+    To run just the Streamlit app in a single container, build from the `GenAIPracticePlatform8th/` directory:
+
+    ```bash
+    docker build -t genai-lab ./GenAIPracticePlatform8th
+    docker run -p 8501:8501 \
+      -e OPENAI_API_KEY=sk-... \
+      -v $(pwd)/content:/app/content \
+      genai-lab
+    ```
+
+    The volume mount (`-v`) persists any sample PDFs or content edits between container restarts.
+
+    ### Python version in Docker
+
+    Pin the base image to Python 3.12 in your `Dockerfile`:
+
+    ```dockerfile
+    FROM python:3.12-slim
+
+    WORKDIR /app
+    COPY requirements-full.txt .
+    RUN pip install --no-cache-dir -r requirements-full.txt
+
+    COPY . .
+    EXPOSE 8501
+    CMD ["streamlit", "run", "streamlit_app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+    ```
+  </Tab>
+
+  <Tab title="Render / Railway / Fly.io">
+    All three platforms support Docker-based deployments and work well with the full GenAI Lab stack. The key differences are how you set environment variables and which port to expose.
+
+    ### Render
+
+    1. Create a new **Web Service** and connect your GitHub repository.
+    2. Set **Runtime** to **Docker** and point the build context at `GenAIPracticePlatform8th/` (or repo root if you've moved the files there).
+    3. Set **Port** to `8501`.
+    4. Add environment variables in the **Environment** tab:
+       - `OPENAI_API_KEY` = `sk-...`
+    5. Click **Deploy**.
+
+    Render auto-detects the `Dockerfile` and builds the image. Use `requirements-full.txt` in the Dockerfile for Labs 3–5.
+
+    ### Railway
+
+    1. Create a new project and select **Deploy from GitHub repo**.
+    2. Railway auto-detects the `Dockerfile`. Set the **PORT** environment variable to `8501` in the **Variables** tab (Railway injects `PORT` automatically on some plans — confirm which applies to yours).
+    3. Add `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` in Variables.
+    4. Click **Deploy**.
+
+    ```bash
+    # Equivalent railway CLI deploy
+    railway login
+    railway link
+    railway variables set OPENAI_API_KEY=sk-...
+    railway up
+    ```
+
+    ### Fly.io
+
+    1. Install the `flyctl` CLI and run `fly auth login`.
+    2. From the platform folder, initialise the app:
+
+       ```bash
+       fly launch --dockerfile Dockerfile --internal-port 8501
+       ```
+
+    3. Set secrets (never use `fly.toml` for API keys):
+
+       ```bash
+       fly secrets set OPENAI_API_KEY=sk-...
+       ```
+
+    4. Deploy:
+
+       ```bash
+       fly deploy
+       ```
+
+    The `--internal-port 8501` flag tells Fly.io which port Streamlit listens on. Fly.io handles TLS termination and public routing automatically.
+
+    <Note>
+      On all three platforms, use the platform's secret / environment variable manager to store API keys — never put them in `fly.toml`, `railway.json`, or `render.yaml`. Those files are committed to your repository and visible to anyone with repo access.
+    </Note>
+  </Tab>
+
+  <Tab title="Local VM">
+    A plain Linux or macOS VM (cloud or on-premise) is the simplest environment for the full stack. No wrapper constraints, no build memory limits.
+
+    ### Using Docker
+
+    Pull or build the image and run it directly:
+
+    ```bash
+    docker build -t genai-lab ./GenAIPracticePlatform8th
+    docker run -d \
+      --name genai-lab \
+      -p 8501:8501 \
+      -e OPENAI_API_KEY=sk-... \
+      genai-lab
+    ```
+
+    Access the app at `http://<vm-ip>:8501`. Open port 8501 in your firewall / security group if needed.
+
+    ### Using streamlit run (no Docker)
+
+    ```bash
+    # On the VM, with Python 3.12 installed
+    git clone https://github.com/nithyasatheesh/GenAI-Lab-Sep.git
+    cd GenAI-Lab-Sep/GenAIPracticePlatform8th
+
+    python -m venv .venv
+    source .venv/bin/activate
+
+    pip install -r requirements-full.txt
+
+    export OPENAI_API_KEY=sk-...
+    streamlit run streamlit_app.py --server.port 8501 --server.address 0.0.0.0
+    ```
+
+    Run it under `tmux` or `screen` so the process persists after you disconnect:
+
+    ```bash
+    tmux new -s genai-lab
+    streamlit run streamlit_app.py --server.port 8501 --server.address 0.0.0.0
+    # Ctrl-B D to detach
+    ```
+  </Tab>
+</Tabs>
+
+## Requirements: Lean vs Full
+
+Use the right requirements file for your deployment target:
+
+| File | Contents | Best for |
+|------|----------|----------|
+| `requirements.txt` | Lean — Streamlit, LangChain core, OpenAI, Anthropic, PyPDF | Streamlit Community Cloud free tier |
+| `requirements-full.txt` | Lean + ChromaDB, LangGraph, MCP, FastEmbed | Local machine, VM, Docker, paid cloud tiers |
+| `requirements-min.txt` | Absolute minimum — no embeddings, no vector store | Emergency fallback if lean still fails to build |
+
+<Warning>
+  Python 3.13 breaks native wheels for `ormsgpack`, `py-rust-stemmers`, and `chroma-hnswlib`. These packages ship prebuilt wheels for Python 3.12 only. Always pin to **Python 3.12** in your platform settings, `Dockerfile` base image, or virtual environment.
+</Warning>
+
+<Note>
+  Never bake API keys into a Docker image or commit them to source control. Always inject them at runtime via environment variables, Docker secrets, or your platform's secret manager. The app reads only `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` from the environment — they are never hard-coded and never exposed to the browser.
+</Note>
+
+## Post-Deploy Checklist
+
+After any deployment, verify the following before sharing the URL:
+
+- **Mock mode works** — open the app, select Lab 1, choose Mock, and click Run on Task 1. You should see real output and no import errors.
+- **Dependency check** — if Lab 1 shows a `ModuleNotFoundError`, the wrong `requirements.txt` was installed. Redeploy with the correct file.
+- **Real LLM mode** — add `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` to your platform's secrets, then reboot/redeploy. The sidebar shows a red warning box if the key is rejected.
+- **Labs 3–5** — these require `requirements-full.txt`. On Community Cloud free tier they will show a blocked message; that is expected behaviour, not a bug.
+- **MCP lab** — confirm `mcp_server.py` is in the same directory as `streamlit_app.py`. The MCP lab spawns it as a subprocess; a missing file produces a `FileNotFoundError` at runtime.

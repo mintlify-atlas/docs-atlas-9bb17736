@@ -1,0 +1,182 @@
+---
+title: "Lab 2: LangChain Tool Calling with Real Tools"
+sidebarTitle: "Lab 2: Tool Calling"
+description: "Bind real LangChain tools to a chat model, handle tool calls, execute them with ToolMessage, and build a complete tool loop — requires a real LLM."
+---
+
+Lab 2 teaches tool calling the way it actually works in production: the model returns a structured request, your code runs the tool, and the result flows back to the model as a `ToolMessage`. The lab ships three real LangChain `@tool` objects (`calculator`, `word_count`, `kb_lookup`), and each task builds directly on the previous one — by Task 4 you have a reusable multi-step tool loop, and Task 5 shows how `kb_lookup` turns tool calling into a lightweight RAG system.
+
+<Warning>
+  This lab requires **OpenAI or Claude mode**. Mock mode cannot emit structured `tool_calls` — the app will block execution with a clear message. Set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` before starting.
+</Warning>
+
+## Lab Overview
+
+```text
+question ─▶ llm.bind_tools(tools) ─▶ tool_calls ─▶ YOUR code runs tool ─▶ ToolMessage ─▶ llm ─▶ answer
+```
+
+| Task | Step | Key piece |
+|------|------|-----------|
+| T1 | Inspect the tools | `get_tools()` → list of `@tool` objects |
+| T2 | Bind tools + one call | `llm.bind_tools(tools).invoke(...)` → `.tool_calls` |
+| T3 | Execute + feed back | `ToolMessage` → re-invoke with full history |
+| T4 | The tool loop | `run_with_tools(question, max_steps=5)` |
+| T5 | Tool-calling RAG | `get_tools(["kb_lookup"])` → grounded HR answer |
+
+## Available Tools
+
+`get_tools()` returns all three tools. Pass a list of names to filter:
+
+```python
+tools = get_tools()                        # all three
+kb_only = get_tools(["kb_lookup"])         # just kb_lookup
+calc = get_tools(["calculator"])           # just calculator
+```
+
+| Tool name | What it does |
+|---|---|
+| `calculator` | Evaluates arithmetic expressions |
+| `word_count` | Counts words in a string |
+| `kb_lookup` | Searches the HR handbook vector store and returns passage text |
+
+## Task 1 — Inspect the Tools
+
+Call `get_tools()` and print each tool's `.name`, `.description`, and `.args` schema. This lets you see exactly what the model will receive when you bind the tools.
+
+```python
+tools = get_tools()
+for t in tools:
+    print(f"{t.name}: {t.description}")
+    print("  args:", t.args)
+```
+
+<Accordion title="Grading criteria for Task 1">
+  | Criterion | Points | What is checked |
+  |---|---|---|
+  | `get` | 3 | `get_tools()` called |
+  | `name` | 3 | `.name` read from each tool |
+  | `args` | 4 | `.args` or `.description` accessed |
+</Accordion>
+
+## Task 2 — Bind Tools and Make One Call
+
+Bind the tools to a real model with `llm.bind_tools(tools)`, then invoke it with an arithmetic question. The model returns an `AIMessage` containing `tool_calls` — a list of `{name, args, id}` dicts describing which tool it wants to run.
+
+```python
+llm = get_chat_model(MODE)
+llm_with_tools = llm.bind_tools(tools)
+resp = llm_with_tools.invoke("What is 128 * 47 + 9?")
+print("tool_calls:", resp.tool_calls)
+print("content:", resp.content)
+```
+
+<Accordion title="Grading criteria for Task 2">
+  | Criterion | Points | What is checked |
+  |---|---|---|
+  | `bind` | 4 | `bind_tools(tools` called |
+  | `invoke` | 3 | `.invoke(` called on the bound model |
+  | `tc` | 3 | `tool_calls` inspected |
+</Accordion>
+
+## Task 3 — Execute the Call and Feed It Back
+
+Look up each requested tool by name, invoke it with the model's `args`, wrap the output in a `ToolMessage`, and send the full conversation back so the model can produce the final answer.
+
+```python
+from langchain_core.messages import HumanMessage, ToolMessage
+
+q = "What is 128 * 47 + 9?"
+by_name = {t.name: t for t in tools}
+tool_msgs = []
+for tc in resp.tool_calls:
+    out = by_name[tc["name"]].invoke(tc["args"])
+    tool_msgs.append(ToolMessage(content=str(out), tool_call_id=tc["id"]))
+    print(f"ran {tc['name']}({tc['args']}) -> {out}")
+
+final = llm_with_tools.invoke([HumanMessage(q), resp, *tool_msgs])
+print("ANSWER:", final.content)
+```
+
+<Accordion title="Grading criteria for Task 3">
+  | Criterion | Points | What is checked |
+  |---|---|---|
+  | `toolmsg` | 4 | `ToolMessage(` constructed |
+  | `run` | 3 | Tool executed via `by_name[...].invoke` |
+  | `back` | 3 | Full message list sent back to the model |
+</Accordion>
+
+## Task 4 — The Tool Loop
+
+Wrap Tasks 2–3 into a reusable `run_with_tools(question, max_steps=5)` function that loops until the model stops requesting tools, then returns the final text answer.
+
+```python
+from langchain_core.messages import HumanMessage, ToolMessage
+
+def run_with_tools(question, max_steps=5):
+    tools = get_tools()
+    llm_with_tools = get_chat_model(MODE).bind_tools(tools)
+    by_name = {t.name: t for t in tools}
+    messages = [HumanMessage(question)]
+    for _ in range(max_steps):
+        resp = llm_with_tools.invoke(messages)
+        messages.append(resp)
+        if not resp.tool_calls:
+            return resp.content
+        for tc in resp.tool_calls:
+            out = by_name[tc["name"]].invoke(tc["args"])
+            print(f"  · {tc['name']}({tc['args']}) -> {out}")
+            messages.append(ToolMessage(content=str(out), tool_call_id=tc["id"]))
+    return "(hit max_steps)"
+
+print(run_with_tools("How many words are in 'the quick brown fox jumps'? Then multiply that by 10."))
+```
+
+<Accordion title="Grading criteria for Task 4">
+  | Criterion | Points | What is checked |
+  |---|---|---|
+  | `fn` | 3 | `def run_with_tools(` defined |
+  | `loop` | 3 | `for _ in range(...)` or `while True` loop |
+  | `stop` | 2 | Exits when `resp.tool_calls` is empty |
+  | `ret` | 2 | Returns `resp.content` |
+</Accordion>
+
+## Task 5 — Tool-Calling RAG with `kb_lookup`
+
+Restrict the model to only the `kb_lookup` tool and ask an HR question. The model is forced to call the knowledge-base lookup before it can answer, making this a minimal RAG system without a retriever chain.
+
+```python
+from langchain_core.messages import HumanMessage, ToolMessage
+
+kb_tools = get_tools(["kb_lookup"])
+by_name = {t.name: t for t in kb_tools}
+llm_kb = get_chat_model(MODE).bind_tools(kb_tools)
+
+q = "What is the standard notice period for regular full-time employees?"
+resp = llm_kb.invoke([HumanMessage(q)])
+msgs = [HumanMessage(q), resp]
+for tc in resp.tool_calls:
+    out = by_name[tc["name"]].invoke(tc["args"])
+    print("kb_lookup ->", out[:200], "...")
+    msgs.append(ToolMessage(content=str(out), tool_call_id=tc["id"]))
+
+print("ANSWER:", llm_kb.invoke(msgs).content)
+```
+
+<Accordion title="Grading criteria for Task 5">
+  | Criterion | Points | What is checked |
+  |---|---|---|
+  | `kbtool` | 4 | `get_tools(["kb_lookup"` called |
+  | `bind` | 3 | `bind_tools(` called |
+  | `back` | 3 | `ToolMessage(` used to feed passages back |
+</Accordion>
+
+## Tips
+
+<Tip>
+  The `by_name` dict pattern (`{t.name: t for t in tools}`) is the key to dispatching tool calls cleanly. Build it once per invocation and reuse it inside the loop.
+</Tip>
+
+<Info>
+  `get_tools(names)` accepts a list like `["kb_lookup"]` or `["calculator", "word_count"]` to return a filtered subset. Passing no argument returns all three tools.
+</Info>

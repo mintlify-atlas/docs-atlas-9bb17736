@@ -1,0 +1,222 @@
+---
+title: "Lab 4: Multi-Agent Supervisor with LangGraph"
+sidebarTitle: "Lab 4: Multi-Agent"
+description: "Build a supervisor-routed multi-agent system: two specialist ReAct sub-agents and a structured-output supervisor on a LangGraph StateGraph."
+---
+
+Lab 4 shows why a single agent with many tools can struggle on compound tasks and what to do about it: split the work between specialist sub-agents and add a supervisor that routes between them. You build two ReAct workers — a **researcher** that only looks things up and an **analyst** that only does arithmetic — then wire them together on a `StateGraph` with a supervisor LLM that decides who acts next using structured output. Task 5 extends the graph with a third reviewer node.
+
+<Warning>
+  This lab requires **OpenAI or Claude mode**. The supervisor uses `with_structured_output()`, which needs a real tool-calling model. Set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` before starting.
+</Warning>
+
+## Architecture
+
+The supervisor receives the conversation history, picks the next worker (or `FINISH`), and the selected worker appends its response before handing back to the supervisor.
+
+```text
+              ┌──────────── supervisor ◀────────────┐
+              │             ▲            ▲           │
+              ▼             │            │           │
+         researcher ────────┘       analyst ─────────┘
+              └────────────▶ FINISH ◀───────────────┘
+```
+
+| Task | Step | Key piece |
+|------|------|-----------|
+| T1 | Two specialist sub-agents | `create_react_agent(llm, get_tools(["kb_lookup"]))` / `["calculator"]` |
+| T2 | Supervisor decision | `llm.with_structured_output(Route)` |
+| T3 | Wire the StateGraph | `add_node` + `add_conditional_edges` + `compile()` |
+| T4 | Run the crew | `crew.invoke({...}, {"recursion_limit": 12})` |
+| T5 | Add a reviewer node | `Route2` with four destinations |
+
+## Task 1 — Two Specialist Sub-Agents
+
+Build each worker with `create_react_agent`, restricting it to exactly one tool. Run each on a question in its domain and print the last message.
+
+```python
+from langgraph.prebuilt import create_react_agent
+
+llm = get_chat_model(MODE)
+researcher = create_react_agent(llm, get_tools(["kb_lookup"]))
+analyst    = create_react_agent(llm, get_tools(["calculator"]))
+
+r = researcher.invoke({"messages": [{"role": "user",
+      "content": "What is the standard notice period?"}]})
+print("RESEARCHER:", r["messages"][-1].content)
+
+a = analyst.invoke({"messages": [{"role": "user", "content": "What is 1234 * 9?"}]})
+print("ANALYST:", a["messages"][-1].content)
+```
+
+<Accordion title="Grading criteria for Task 1">
+  | Criterion | Points | What is checked |
+  |---|---|---|
+  | `researcher` | 4 | `create_react_agent` called with `get_tools(["kb_lookup"` |
+  | `analyst` | 4 | `create_react_agent` called with `get_tools(["calculator"` |
+  | `run` | 2 | `.invoke(` called |
+</Accordion>
+
+## Task 2 — The Supervisor's Routing Decision
+
+Define a Pydantic `Route` model with a `next` field restricted to three literals, then bind it to the chat model with `with_structured_output()`. The result is a router that always returns a valid routing decision.
+
+```python
+from pydantic import BaseModel
+from typing import Literal
+
+class Route(BaseModel):
+    next: Literal["researcher", "analyst", "FINISH"]
+
+router = get_chat_model(MODE).with_structured_output(Route)
+
+SUP = ("You manage a researcher (looks up HR facts) and an analyst (does maths). "
+       "Pick who acts next, or FINISH when the question is fully answered.")
+print(router.invoke(SUP + "\nUser: how many sick days are there, times 4?"))
+print(router.invoke(SUP + "\nUser: how many sick days? \nresearcher: 10 days. \nanalyst: 40."))
+```
+
+<Accordion title="Grading criteria for Task 2">
+  | Criterion | Points | What is checked |
+  |---|---|---|
+  | `model` | 4 | `class Route(BaseModel)` defined |
+  | `struct` | 4 | `with_structured_output(Route)` called |
+  | `call` | 2 | `router.invoke(` called |
+</Accordion>
+
+## Task 3 — Wire the StateGraph
+
+Assemble a `StateGraph` with the three nodes. The supervisor node reads the conversation, calls the router, and returns `{"next": ...}`. Worker nodes call their sub-agent and return the last message. Conditional edges on the supervisor route to the correct worker or `END`.
+
+```python
+from typing import Annotated, TypedDict
+from langgraph.graph import StateGraph, START, END
+from langgraph.graph.message import add_messages
+
+class S(TypedDict):
+    messages: Annotated[list, add_messages]
+    next: str
+
+def supervisor(state):
+    convo = "\n".join(f"{m.type}: {m.content}" for m in state["messages"])
+    return {"next": router.invoke(SUP + "\n" + convo).next}
+
+def researcher_node(state):
+    out = researcher.invoke({"messages": state["messages"]})
+    return {"messages": [out["messages"][-1]]}
+
+def analyst_node(state):
+    out = analyst.invoke({"messages": state["messages"]})
+    return {"messages": [out["messages"][-1]]}
+
+g = StateGraph(S)
+g.add_node("supervisor", supervisor)
+g.add_node("researcher", researcher_node)
+g.add_node("analyst", analyst_node)
+g.add_edge(START, "supervisor")
+g.add_conditional_edges(
+    "supervisor",
+    lambda s: s["next"],
+    {"researcher": "researcher", "analyst": "analyst", "FINISH": END},
+)
+g.add_edge("researcher", "supervisor")
+g.add_edge("analyst", "supervisor")
+crew = g.compile()
+print(crew.get_graph().draw_ascii())
+```
+
+<Accordion title="Grading criteria for Task 3">
+  | Criterion | Points | What is checked |
+  |---|---|---|
+  | `graph` | 3 | `StateGraph(` instantiated |
+  | `nodes` | 3 | Both `"researcher"` and `"analyst"` nodes added |
+  | `route` | 2 | `add_conditional_edges("supervisor"` called |
+  | `back` | 2 | `add_edge("researcher", "supervisor"` present |
+</Accordion>
+
+## Task 4 — Run the Crew
+
+Invoke the compiled graph on a compound task that needs both a lookup and maths. Set a `recursion_limit` to prevent infinite loops, then print the full message trace.
+
+```python
+q = "How many earned leave days do we get, and what is that number squared?"
+result = crew.invoke(
+    {"messages": [{"role": "user", "content": q}]},
+    {"recursion_limit": 12},
+)
+for m in result["messages"]:
+    m.pretty_print()
+```
+
+<Accordion title="Grading criteria for Task 4">
+  | Criterion | Points | What is checked |
+  |---|---|---|
+  | `invoke` | 6 | `crew.invoke(` called |
+  | `limit` | 4 | `recursion_limit` set |
+</Accordion>
+
+## Task 5 — Add a Reviewer Node
+
+Extend the graph with a third **reviewer** worker that re-checks the analyst's numbers using the `calculator`. Update `Route` to `Route2` with four routing destinations, rebuild the router, and re-compile the graph.
+
+```python
+from typing import Annotated, Literal, TypedDict
+from pydantic import BaseModel
+from langchain_core.messages import HumanMessage
+from langgraph.graph import StateGraph, START, END
+from langgraph.graph.message import add_messages
+
+class Route2(BaseModel):
+    next: Literal["researcher", "analyst", "reviewer", "FINISH"]
+
+router = get_chat_model(MODE).with_structured_output(Route2)
+
+class S2(TypedDict):
+    messages: Annotated[list, add_messages]
+    next: str
+
+def supervisor(state):
+    convo = "\n".join(f"{m.type}: {m.content}" for m in state["messages"])
+    return {"next": router.invoke(
+        SUP + " There is also a reviewer that re-checks numbers.\n" + convo
+    ).next}
+
+def worker(agent, prefix=None):
+    def node(state):
+        msgs = list(state["messages"])
+        if prefix:
+            msgs.append(HumanMessage(prefix))
+        out = agent.invoke({"messages": msgs})
+        return {"messages": [out["messages"][-1]]}
+    return node
+
+g = StateGraph(S2)
+g.add_node("supervisor", supervisor)
+g.add_node("researcher", worker(researcher))
+g.add_node("analyst", worker(analyst))
+g.add_node("reviewer", worker(analyst, "Reviewer: re-check the last number with the calculator."))
+g.add_edge(START, "supervisor")
+g.add_conditional_edges("supervisor", lambda s: s["next"], {
+    "researcher": "researcher", "analyst": "analyst",
+    "reviewer": "reviewer", "FINISH": END,
+})
+for w in ("researcher", "analyst", "reviewer"):
+    g.add_edge(w, "supervisor")
+crew2 = g.compile()
+
+q = "How many earned leave days do we get, and what is that number squared?"
+out = crew2.invoke({"messages": [{"role": "user", "content": q}]}, {"recursion_limit": 16})
+print(out["messages"][-1].content)
+```
+
+<Accordion title="Grading criteria for Task 5">
+  | Criterion | Points | What is checked |
+  |---|---|---|
+  | `route` | 4 | `Literal[...]` includes `"reviewer"` |
+  | `node` | 4 | `add_node("reviewer"` called |
+  | `edge` | 2 | `"reviewer"` loops back to `"supervisor"` |
+</Accordion>
+
+<Tip>
+  The `worker(agent, prefix)` factory pattern from the Task 5 solution is a clean way to add specialised behaviour to an existing sub-agent without rebuilding it from scratch. Prepending a `HumanMessage` directs the sub-agent's next step without changing its tool set.
+</Tip>

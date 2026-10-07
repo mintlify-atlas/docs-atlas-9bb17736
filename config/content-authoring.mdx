@@ -1,0 +1,277 @@
+---
+title: "Add Custom Labs with the practice.yaml Content Schema"
+sidebarTitle: "Content Authoring"
+description: "Drop a practice.yaml into content/<lab_id>/ to add a new lab. The schema defines tasks, hints, starter code, solution, and grading checks."
+---
+
+Every lab in GenAI Lab is driven entirely by a single YAML file. There is no code to modify and no database to seed — the platform discovers labs at runtime by scanning the `content/` directory, and the `practice.yaml` file inside each lab folder is the complete specification: title, mode requirements, five tasks, hints, starter code, reference solutions, and the regex-based grading rubric. This page documents every field in that schema and walks through adding a working custom lab from scratch.
+
+## How content loading works
+
+`streamlit_app.py` exposes two cached functions that drive all content:
+
+```python
+# streamlit_app.py
+@st.cache_data(show_spinner=False)
+def list_labs() -> list[str]:
+    if not CONTENT.is_dir():
+        return []
+    return sorted(p.name for p in CONTENT.iterdir() if (p / "practice.yaml").is_file())
+
+@st.cache_data(show_spinner=False)
+def load_lab(lab_id: str) -> dict:
+    return yaml.safe_load((CONTENT / lab_id / "practice.yaml").read_text("utf-8"))
+```
+
+`list_labs()` returns every directory under `content/` that contains a `practice.yaml`. The names are sorted alphabetically, so prefix your lab IDs with numbers (`01-rag`, `06-my-lab`) to control the sidebar order. `load_lab(lab_id)` parses the YAML into a plain Python dict; the app accesses all fields by key name directly from that dict.
+
+## Full schema reference
+
+### Top-level fields
+
+<ParamField path="lab_id" type="string" required>
+  A short, filesystem-safe identifier that matches the folder name exactly (e.g. `01-rag`, `06-my-lab`). Used as the key in grading storage and Excel exports.
+</ParamField>
+
+<ParamField path="title" type="string" required>
+  Human-readable lab name shown in the sidebar and on the Score page (e.g. `"1 · RAG with ChromaDB"`).
+</ParamField>
+
+<ParamField path="requires" type="list[string]">
+  Python import names (not pip names) that must be importable for the lab to run. If any are missing the app shows a friendly error before attempting a Run, listing the corresponding pip install name.
+
+  ```yaml
+  requires:
+    - langchain_core
+    - langchain_community
+    - langchain_text_splitters
+    - pypdf
+  ```
+
+  The mapping from import name to pip package is maintained in `streamlit_app.py`'s `PIP_NAME` dict (e.g. `langchain_core` → `langchain-core`, `langgraph` → `langgraph`).
+</ParamField>
+
+<ParamField path="mode_required" type="string">
+  Set to `"real"` to block the entire lab in Mock mode. When present, every task in the lab requires a real LLM. For finer-grained control, set `needs_real: true` on individual tasks instead.
+</ParamField>
+
+<ParamField path="notes" type="string">
+  Short note shown in the sidebar info box when the lab is selected. Useful for flagging requirements or known constraints (e.g. which requirements file is needed).
+</ParamField>
+
+<ParamField path="overview" type="markdown string">
+  Full Markdown content rendered on the **📋 Overview** page before Task 1. Supports headings, tables, code fences, and ASCII diagrams. When present, a **Start Task 1 ▶** button is added at the bottom automatically. Leave this field out to skip the Overview page entirely and go straight to Task 1.
+</ParamField>
+
+---
+
+### `tasks[]` fields
+
+Each task is an item in the top-level `tasks` list. Labs conventionally have five tasks numbered 1–5.
+
+<ParamField path="tasks[].id" type="integer" required>
+  Task number (1–5). Used as the storage key for submissions, grading results, and solution-reveal flags.
+</ParamField>
+
+<ParamField path="tasks[].title" type="string" required>
+  Short title shown in the navigation bar and Score page (e.g. `"Load the PDF"`).
+</ParamField>
+
+<ParamField path="tasks[].weight" type="integer">
+  Marks this task is worth out of 100. If omitted, the app applies the default weight table: **T1 = 10, T2 = 25, T3 = 25, T4 = 15, T5 = 25** (sums to 100). Explicitly setting `weight:` on all tasks lets you redistribute marks — just ensure all weights across the lab sum to 100.
+
+  ```python
+  # streamlit_app.py
+  TASK_WEIGHTS = {1: 10, 2: 25, 3: 25, 4: 15, 5: 25}
+
+  def task_weight(t: dict, idx: int) -> int:
+      return int(t.get("weight", TASK_WEIGHTS.get(t.get("id", idx + 1), 20)))
+  ```
+</ParamField>
+
+<ParamField path="tasks[].prompt" type="markdown string" required>
+  The task description shown to the learner. Supports full Markdown including inline code, bold, and lists. This is the primary instruction the learner reads before writing code.
+</ParamField>
+
+<ParamField path="tasks[].hints" type="list[string]" required>
+  Progressive hints revealed one at a time when the learner presses **💡 Hint**. Each press reveals the next hint in the list. Hints support inline Markdown. Aim for 3–4 hints that escalate from direction to near-solution guidance.
+</ParamField>
+
+<ParamField path="tasks[].starter" type="string" required>
+  The initial code placed in the editor when the task loads (or after **↺ Reset**). Should include `# TODO:` comments that map to the checks. Use YAML block scalar (`|`) to preserve newlines.
+</ParamField>
+
+<ParamField path="tasks[].solution" type="string" required>
+  The reference solution revealed when the learner toggles **Reveal solution code**. Viewing the solution is flagged on the Score page. Use YAML block scalar (`|`).
+</ParamField>
+
+<ParamField path="tasks[].needs_real" type="boolean">
+  Set to `true` on a specific task to block only that task in Mock mode, while allowing earlier tasks to run normally. Takes effect independently of the lab-level `mode_required` setting.
+</ParamField>
+
+<ParamField path="tasks[].checks" type="list[object]">
+  The legacy regex grading rubric. Each item is a criterion evaluated against the learner's code (with string literals and comments stripped). Used for all labs and tasks that do not have hand-written criteria in `grader.py`.
+</ParamField>
+
+---
+
+### `checks[]` fields (legacy regex rubric)
+
+<ParamField path="checks[].id" type="string" required>
+  Short identifier used in grading storage (e.g. `"import"`, `"create"`, `"load"`).
+</ParamField>
+
+<ParamField path="checks[].points" type="integer" required>
+  Raw points this criterion is worth before scaling. The app scales all raw points so the task totals exactly `weight` marks.
+</ParamField>
+
+<ParamField path="checks[].pattern" type="string" required>
+  A Python `re` pattern matched against the code with `re.I | re.S` flags. String literals and `#` comments are stripped before matching, so patterns cannot false-positive on commented-out code.
+
+  ```yaml
+  checks:
+    - id: import
+      points: 3
+      pattern: "from\\s+langchain_community\\.document_loaders\\s+import\\s+PyPDFLoader"
+      desc: "imports PyPDFLoader"
+    - id: create
+      points: 3
+      pattern: "PyPDFLoader\\s*\\(\\s*SAMPLE_PDF"
+      desc: "loads SAMPLE_PDF"
+  ```
+</ParamField>
+
+<ParamField path="checks[].desc" type="string">
+  Human-readable description shown next to the ✅/❌ result in the Check panel (e.g. `"imports PyPDFLoader"`).
+</ParamField>
+
+---
+
+## Mode-gating: lab-level vs task-level
+
+Two orthogonal controls block content when a real LLM is unavailable:
+
+| Field | Scope | Behaviour |
+|---|---|---|
+| `mode_required: real` | Entire lab | All five tasks show the "needs real LLM" info box; Run is blocked on every task |
+| `needs_real: true` | Single task | Only that task is blocked; earlier tasks run normally in Mock mode |
+
+The RAG lab (`01-rag`) omits both — it runs fully in Mock mode. Labs 2–4 set `mode_required: real`. MCP Lab tasks 4 and 5 use `needs_real: true` so the connection and discovery tasks (1–3) are still usable without a key.
+
+## Grading engine integration
+
+Labs with hand-written criteria in `grader.py` use the AST + runtime criterion engine instead of regex checks. The `grader.has_criteria(lab_id, task_id)` function is the switch:
+
+```python
+# streamlit_app.py
+def evaluate(code: str, t: dict, idx: int, spec: dict, mode: str, dev: bool) -> dict:
+    tid = t["id"]
+    lab_id = spec.get("lab_id", "")
+    if grader.has_criteria(lab_id, tid):
+        # criterion engine: AST analysis + runtime namespace inspection
+        src = accumulated_learner_source(spec, tid, mode)
+        res = grader.grade_task(tid, code, lab_id=lab_id, accumulated_source=src, ...)
+        ...
+    return grade_task(code, t, idx)   # legacy regex fallback
+```
+
+Currently `01-rag` is the only lab with full criterion coverage in `grader.py`. All other labs use the `checks:` regex rubric from the YAML. When you add a custom lab, the regex rubric is the correct grading path — no changes to `grader.py` are needed.
+
+<Tip>
+  Run `python grader_tests.py` from the platform directory to execute the 8-case self-test suite for `grader.py` before deploying. This validates that the criterion engine produces correct scores for both passing and failing learner submissions and catches regressions when you extend the grader.
+</Tip>
+
+## Minimal working example
+
+The following is a complete, deployable custom lab that teaches LangChain tool binding. Drop the folder at `content/06-tool-basics/practice.yaml` and restart the app.
+
+```yaml
+lab_id: 06-tool-basics
+title: "6 · Tool Binding Basics"
+requires:
+  - langchain_core
+  - langchain_openai
+mode_required: real
+notes: >
+  Needs a real LLM. Set OPENAI_API_KEY or ANTHROPIC_API_KEY in the sidebar.
+overview: |
+  ## Goal
+  Learn to define a LangChain `@tool`, bind it to a chat model,
+  and inspect the resulting tool call.
+
+tasks:
+  - id: 1
+    title: Define a Tool
+    weight: 30
+    prompt: |
+      Define a `@tool` named `add` that takes two integers `a` and `b`
+      and returns their sum as a string.
+    hints:
+      - "Import `tool` from `langchain_core.tools`."
+      - "Decorate a normal Python function with `@tool`."
+      - "Return `str(a + b)`."
+    starter: |
+      # Task 1 — define an @tool named 'add'
+      # TODO: from langchain_core.tools import tool
+      # TODO: @tool
+      # TODO: def add(a: int, b: int) -> str: ...
+    solution: |
+      from langchain_core.tools import tool
+
+      @tool
+      def add(a: int, b: int) -> str:
+          """Add two integers and return the result as a string."""
+          return str(a + b)
+
+      print(add.name, add.description)
+    checks:
+      - id: decorator
+        points: 5
+        pattern: "@tool"
+        desc: "uses @tool decorator"
+      - id: func_name
+        points: 5
+        pattern: "def\\s+add\\s*\\("
+        desc: "function named add"
+      - id: returns
+        points: 5
+        pattern: "return\\s+str\\s*\\("
+        desc: "returns str(...)"
+
+  - id: 2
+    title: Bind the Tool to a Model
+    weight: 30
+    needs_real: true
+    prompt: |
+      Bind the `add` tool to a chat model using `get_chat_model(MODE)`.
+      Call `model_with_tools.invoke(...)` with a message that asks
+      "What is 7 + 15?" and print the tool_calls from the response.
+    hints:
+      - "`llm = get_chat_model(MODE)` gives you the mode-appropriate model."
+      - "`model_with_tools = llm.bind_tools([add])`."
+      - "Check `response.tool_calls` for the list of requested calls."
+    starter: |
+      # Task 2 — bind and invoke (uses `add` from Task 1)
+      llm = get_chat_model(MODE)
+      # TODO: model_with_tools = llm.bind_tools([add])
+      # TODO: response = model_with_tools.invoke("What is 7 + 15?")
+      # TODO: print(response.tool_calls)
+    solution: |
+      llm = get_chat_model(MODE)
+      model_with_tools = llm.bind_tools([add])
+      response = model_with_tools.invoke("What is 7 + 15?")
+      print(response.tool_calls)
+    checks:
+      - id: bind
+        points: 6
+        pattern: "bind_tools\\s*\\("
+        desc: "calls bind_tools"
+      - id: invoke
+        points: 4
+        pattern: "\\.invoke\\s*\\("
+        desc: "invokes the model"
+```
+
+<Note>
+  Task 2 above sets `needs_real: true` because `MockGroundedChat` cannot emit `tool_calls`. Task 1 has no such restriction and can be checked (though not Run) in Mock mode.
+</Note>

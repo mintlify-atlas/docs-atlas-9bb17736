@@ -1,0 +1,202 @@
+---
+title: "Troubleshoot GenAI Lab Build and Runtime Errors"
+sidebarTitle: "Troubleshooting"
+description: "Fix common GenAI Lab errors: Streamlit Cloud build failures, missing packages, API key rejections, MCP file-not-found, and LangGraph import errors."
+---
+
+Most issues in GenAI Lab fall into one of three categories: Streamlit Cloud build failures caused by the wrong Python version or a too-heavy requirements file; runtime `ModuleNotFoundError` errors caused by using the lean `requirements.txt` where `requirements-full.txt` is needed; and API key problems that surface as authentication errors or silent Mock-mode fallbacks. The accordions below cover each failure mode with its root cause and the exact fix.
+
+<Note>
+  The `requirements.txt` in this repo is **intentionally lean** for Streamlit Community Cloud's free tier: it omits `chromadb`, `langgraph`, `fastembed`, `mcp`, and `onnxruntime` to stay within the free-tier build memory limit. Labs 3–5 (LangGraph agent, multi-agent, MCP) require `requirements-full.txt` and must run on a local machine, paid-tier deployment, or Docker container. The grading engine, Excel export, and Mock/OpenAI/Claude modes all work on the lean file.
+</Note>
+
+## Build failures (Streamlit Cloud)
+
+<Accordion title="installer returned a non-zero exit code — rust/C++ crate fails to build">
+  **Symptom:** The Streamlit Cloud build log shows pip running to completion (`Successfully installed …`) and then the wrapper prints `installer returned a non-zero exit code` or `Error during processing dependencies`. The failure lines mention crates such as `ormsgpack`, `py-rust-stemmers`, or `chroma-hnswlib`.
+
+  **Root cause:** The app is deploying on Python 3.13. Those packages ship prebuilt wheels only for Python 3.12. On 3.13, pip attempts to compile from source and fails because the Community Cloud build environment has no Rust toolchain.
+
+  **Fix:**
+
+  <Steps>
+    <Step title="Set Python 3.12 in Advanced settings">
+      In the Streamlit Cloud dashboard go to **Manage app → Settings → Advanced settings** and set **Python version** to **3.12**.
+    </Step>
+    <Step title="Remove runtime.txt and .python-version from the repo">
+      If the deployed folder contains a `runtime.txt` or `.python-version` file, delete them and commit. Streamlit Cloud's `uv`-based builder can misinterpret those files and override the Advanced settings choice, causing the same error.
+
+      ```bash
+      git rm runtime.txt .python-version
+      git commit -m "fix: remove python version files, set 3.12 in Advanced settings"
+      git push
+      ```
+    </Step>
+    <Step title="Reboot the app">
+      Click **Reboot app** in the dashboard. The build should complete in approximately one minute on the lean `requirements.txt`.
+    </Step>
+  </Steps>
+</Accordion>
+
+<Accordion title="OOM / killed during build — build process is terminated">
+  **Symptom:** The build log shows `Killed` or the process is terminated mid-install with no error message. The log often shows heavy churn through `rich`, `markdown-it-py`, and `pygments` before dying.
+
+  **Root cause:** The free-tier build environment ran out of memory unpacking the combined native-wheel tree of `chromadb` + `onnxruntime` + `fastembed` + `langgraph`.
+
+  **Fix (option 1 — remove fastembed):** Open `requirements.txt` and delete the `fastembed` line. In Mock mode the platform falls back to `DeterministicFakeEmbedding` (retrieval quality is weaker but the lab still runs). Commit and redeploy.
+
+  **Fix (option 2 — use the minimum requirements file):** If the build still fails after removing `fastembed`, rename `requirements-min.txt` to `requirements.txt`. This is the absolute floor — only the packages essential for Lab 1 and the graded UI.
+
+  ```bash
+  cp requirements-min.txt requirements.txt
+  git add requirements.txt
+  git commit -m "fix: use minimum requirements for Community Cloud"
+  git push
+  ```
+</Accordion>
+
+## Runtime ModuleNotFoundError
+
+<Accordion title="ModuleNotFoundError: chromadb or langchain_chroma at runtime">
+  **Symptom:** After a successful build, pressing **▶ Run** in Lab 1 (RAG) raises `ModuleNotFoundError: No module named 'chromadb'`.
+
+  **Root cause:** The `requirements.txt` that was built does not include `chromadb`. This is expected on the lean file — the platform gracefully falls back to `langchain-core`'s `InMemoryVectorStore` (same `.similarity_search` interface, real cosine retrieval). If you see this error in the UI rather than a graceful fallback message, the deployed `requirements.txt` is an outdated copy from a different folder.
+
+  **Fix:** Verify that the `requirements.txt` next to `streamlit_app.py` is the current one. Check **Manage app → Settings → Main file path** — the `requirements.txt` in that same directory is what Cloud builds. Replace it with the current version and redeploy. For full ChromaDB support, use `requirements-full.txt` on a local or paid-tier environment.
+</Accordion>
+
+<Accordion title="ModuleNotFoundError: mcp or langchain_mcp_adapters at runtime">
+  **Symptom:** The MCP lab (Lab 5) fails immediately with `ModuleNotFoundError: No module named 'mcp'`.
+
+  **Root cause:** `mcp` and `langchain-mcp-adapters` are in `requirements-full.txt` only. They are intentionally excluded from the Community Cloud lean file.
+
+  **Fix:** Install `requirements-full.txt` on a local machine, a paid Streamlit tier, or a Docker container running Python 3.12:
+
+  ```bash
+  pip install -r requirements-full.txt
+  streamlit run streamlit_app.py
+  ```
+</Accordion>
+
+<Accordion title="ModuleNotFoundError: langgraph at runtime (Labs 3–5 blocked)">
+  **Symptom:** Labs 3–5 display a "Cannot Run — packages missing" error listing `langgraph`.
+
+  **Root cause:** `langgraph` is a full-stack dependency excluded from the lean `requirements.txt`. On the Community Cloud free tier these labs are intentionally blocked with a clear message rather than partially running.
+
+  **Fix:** Use `requirements-full.txt` locally or on a machine/container with sufficient memory:
+
+  ```bash
+  pip install -r requirements-full.txt
+  streamlit run streamlit_app.py
+  ```
+
+  This is the expected path for Labs 3–5. The lean file is not a bug — it is the Community Cloud workaround documented in `DEPLOY.md`.
+</Accordion>
+
+<Accordion title="ModuleNotFoundError: fastembed in Mock mode">
+  **Symptom:** In Mock mode, Lab 1 prints a warning like `FastEmbed unavailable (ModuleNotFoundError: No module named 'fastembed'); using DeterministicFakeEmbedding`.
+
+  **Root cause:** `fastembed` is not installed. The platform catches this and uses `DeterministicFakeEmbedding` from `langchain-core` as a last resort — retrieval still works but keyword overlap quality is reduced.
+
+  **Fix (preferred):** Install `requirements-full.txt` to get the real `BAAI/bge-small-en-v1.5` FastEmbed ONNX model. The first run downloads ~90 MB once and caches it.
+
+  **Acceptable workaround:** Use OpenAI mode with a valid `OPENAI_API_KEY`. `OpenAIEmbeddings` does not depend on `fastembed` at all and provides higher-quality retrieval than either local option.
+</Accordion>
+
+## API key errors
+
+<Accordion title="OpenAIAuthenticationError 401 — API key rejected">
+  **Symptom:** Pressing **▶ Run** immediately raises `openai.AuthenticationError: Error code: 401` or the sidebar shows a red error box after the key-check ping.
+
+  **Root cause:** The `OPENAI_API_KEY` in the environment or Streamlit Secrets is invalid, expired, or mis-typed. The platform checks `os.environ.get("OPENAI_API_KEY", "").startswith("sk-")` as a format guard, but this cannot verify the key is actually accepted by OpenAI.
+
+  **Fix:**
+
+  <Steps>
+    <Step title="Verify the key in the OpenAI dashboard">
+      Log in to platform.openai.com, go to **API keys**, and confirm the key is active and has usage remaining.
+    </Step>
+    <Step title="Update the key in Secrets or the environment">
+      For Streamlit Cloud: **Manage app → Settings → Secrets** — update the `OPENAI_API_KEY` value. For local: `export OPENAI_API_KEY=sk-...` in your shell before starting the app.
+    </Step>
+    <Step title="Re-check the key">
+      Press the **Re-check key** button in the sidebar to force a new ping call. A green ✅ confirms the key is now accepted.
+    </Step>
+  </Steps>
+
+  As a temporary workaround while you fix the key, switch the sidebar to **🧪 Mock (demo, no key)** to continue working on Lab 1.
+</Accordion>
+
+<Accordion title="App stays in Mock mode even though a key is set">
+  **Symptom:** The sidebar defaults to Mock despite `OPENAI_API_KEY` being present in the environment.
+
+  **Root cause:** `sandbox.has_openai()` checks `os.environ.get("OPENAI_API_KEY", "").startswith("sk-")`. If the key does not start with `sk-`, the check fails silently and the app falls back to Mock.
+
+  Common causes: a leading or trailing space in the secret value, using a project key that starts with a different prefix, or the secret not being saved before the last reboot.
+
+  **Fix:** On Streamlit Cloud, open **Settings → Secrets**, remove any surrounding quotes or spaces from the key value, save, and reboot. Locally, run `echo $OPENAI_API_KEY` to confirm the value starts exactly with `sk-`.
+</Accordion>
+
+## MCP lab errors
+
+<Accordion title="FileNotFoundError when starting the MCP server">
+  **Symptom:** MCP Lab (Lab 5) raises `FileNotFoundError: [Errno 2] No such file or directory: '/path/to/mcp_server.py'` when connecting to the server.
+
+  **Root cause:** `sandbox.py` sets `MCP_SERVER_PATH = str(HERE / "mcp_server.py")` where `HERE` is the directory containing `sandbox.py`. The MCP lab spawns `mcp_server.py` as a subprocess using `sys.executable` with that path. If `mcp_server.py` is not in the same directory as `streamlit_app.py` and `sandbox.py`, the path is wrong.
+
+  ```python
+  # sandbox.py
+  MCP_SERVER_PATH = str(HERE / "mcp_server.py")
+
+  def mcp_stdio_config(server_name: str = "sandbox") -> dict:
+      return {server_name: {"command": sys.executable,
+                            "args": [MCP_SERVER_PATH], "transport": "stdio"}}
+  ```
+
+  **Fix:** Ensure `mcp_server.py` is in the same folder as `streamlit_app.py`. If you deployed to a subfolder, check that all four files (`streamlit_app.py`, `sandbox.py`, `grader.py`, `mcp_server.py`) are together. Streamlit Cloud's **Main file path** setting determines which folder is the root.
+</Accordion>
+
+## Grading and editor issues
+
+<Accordion title="supports_tool_calling returns False — Run blocked on agent labs">
+  **Symptom:** Labs 2–4 or MCP Tasks 4–5 display "This exercise needs a real tool-calling LLM" and the Run button is blocked.
+
+  **Root cause:** The active mode is Mock. `sandbox.supports_tool_calling("mock")` returns `False` because `MockGroundedChat` cannot generate structured tool call outputs.
+
+  ```python
+  # sandbox.py
+  def supports_tool_calling(mode: Optional[str] = None) -> bool:
+      """Mock cannot emit tool calls — agent labs need a real LLM."""
+      return resolve_mode(mode) in ("openai", "claude")
+  ```
+
+  **Fix:** Set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` and switch the sidebar to **🔷 OpenAI (real)** or **🟣 Claude (real)**. Press **Re-check key** to confirm the key is accepted before attempting a Run.
+</Accordion>
+
+<Accordion title="Stale 'edited after check' warning on the Score page">
+  **Symptom:** The Score page shows "edited after check — re-check & submit" for a task, and that task scores 0 even though you ran the checks earlier.
+
+  **Root cause:** The grading system tracks the exact code string at the time of the last **✓ Check**. If the code in the editor is different from the graded version — even by a single character — the stored result is marked stale and scored at 0 to prevent submitting a score for code you haven't actually checked.
+
+  ```python
+  # streamlit_app.py — stale detection
+  stale = bool(rows) and st.session_state.get(f"graded_code_{tid}") != cur_code
+  ```
+
+  **Fix:** Navigate back to the task, press **✓ Check** on your current code, then press **✔ Submit**. The stale warning clears and the new score is recorded.
+</Accordion>
+
+<Accordion title="PyYAML missing — app stops before loading">
+  **Symptom:** The app immediately displays "**PyYAML is missing.** Add `pyyaml` to `requirements.txt` at the repo root, commit, and let Streamlit rebuild." and shows nothing else.
+
+  **Root cause:** `pyyaml` is not in the `requirements.txt` that was built. This is the very first import in `streamlit_app.py` and the app cannot proceed without it.
+
+  **Fix:** Add `pyyaml` to `requirements.txt` at the top of the file, commit, and push. Streamlit Cloud will automatically rebuild.
+
+  ```text
+  streamlit
+  pyyaml
+  openpyxl
+  ...
+  ```
+</Accordion>

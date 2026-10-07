@@ -1,0 +1,89 @@
+---
+title: "GenAI Lab: Real Code, Real Grading, Five AI Labs"
+sidebarTitle: "Introduction"
+description: "GenAI Lab is an interactive practice platform for GenAI engineering — five labs with real code execution, AST-based grading, and multi-LLM support."
+---
+
+GenAI Lab is a hands-on practice platform built for developers who want to go beyond tutorials and actually write working GenAI and Agentic-AI code. Every lab presents a real engineering task — you edit starter code, hit **Run**, and your submission executes in a live Python interpreter. You see genuine stdout, real tracebacks, real LangChain objects, and a criterion-by-criterion score — not a simulated preview. Whether you deploy it as a Streamlit app for a class or spin up the browser-based JupyterLab image for solo exploration, the learning loop is identical: write code → run it → understand why it passed or failed.
+
+## Two Deployment Targets
+
+GenAI Lab ships as two independent products that share the same lab content:
+
+<CardGroup cols={2}>
+  <Card title="Streamlit Practice Platform" icon="play">
+    A single-file Streamlit app (`streamlit_app.py`) with an in-browser code editor, execution output, hints, solutions, and a scored results page. Deploy to Streamlit Community Cloud in minutes or run locally with one command.
+  </Card>
+  <Card title="JupyterLab (Browser-Based)" icon="book-open">
+    A Dockerised JupyterLab environment with the full dependency stack pre-installed. Open a notebook, run cells, and explore the same lab exercises without installing anything on your host machine.
+  </Card>
+</CardGroup>
+
+## Five Labs at a Glance
+
+Each lab contains five tasks that build on each other. Labs 1 and 5 (tasks 1–3) run in **Mock mode** without any API key; Labs 2–4 and MCP tasks 4–5 require a real LLM.
+
+| # | Lab | What You Build | Mode |
+|---|-----|----------------|------|
+| 1 | **RAG with ChromaDB** | PyPDFLoader → splitter → embed + index → grounded answer → interactive loop | Any (Mock ok) |
+| 2 | **Tool Calling** | `bind_tools` → `tool_calls` → execute → `ToolMessage` loop → tool-calling RAG | Real |
+| 3 | **Agent (LangGraph ReAct)** | `create_react_agent` → persona → stream steps → inspect graph → custom tool | Real |
+| 4 | **Multi-Agent (LangGraph)** | Two ReAct workers → supervisor with `with_structured_output` → `StateGraph` crew | Real |
+| 5 | **MCP** | Connect + discover → call MCP tool → read resource → MCP tools + model → ReAct over MCP | 1–3 any, 4–5 real |
+
+## Three LLM Modes
+
+The sidebar lets you switch between LLM providers at any time without restarting:
+
+| Mode | Model | Requires |
+|------|-------|----------|
+| **OpenAI** | `gpt-4o-mini` (override with `OPENAI_MODEL`) | `OPENAI_API_KEY` |
+| **Claude** | `claude-sonnet-4-5` (override with `ANTHROPIC_MODEL`) | `ANTHROPIC_API_KEY` |
+| **Mock** | Local `BaseChatModel` answering from retrieved context | Nothing — fully keyless |
+
+<Note>
+  Mock mode cannot perform tool calling. Labs 2–4 and MCP tasks 4–5 are blocked in Mock mode with a clear message — they are never silently faked.
+</Note>
+
+## What Makes It Real
+
+Nothing in GenAI Lab is simulated. When you click **Run**, your code is compiled and executed with Python's `exec()` inside the same interpreter that runs the app — the same process, the same imports, real stdout and real tracebacks.
+
+| Component | How It's Real |
+|-----------|---------------|
+| **Python execution** | `exec(compile(source), namespace)` — real stdout/stderr, real exceptions |
+| **LangChain / LangGraph** | Genuine objects: loaders, splitters, prompts, chains, `StateGraph`, `create_react_agent` |
+| **Vector store** | Real ChromaDB (`chromadb.EphemeralClient`); auto-falls back to `langchain-core` `InMemoryVectorStore` on the lean build — same interface, real cosine retrieval |
+| **Embeddings** | OpenAI mode → `OpenAIEmbeddings`; keyless → local FastEmbed ONNX model; lean build → deterministic fallback |
+| **MCP** | `mcp_server.py` (FastMCP) launched as a real subprocess; `langchain-mcp-adapters` speaks MCP over stdio |
+| **Tools** | Real LangChain `@tool` objects: `calculator`, `word_count`, `kb_lookup` |
+
+## How Grading Works
+
+The grading engine in `grader.py` evaluates submissions criterion by criterion — not just "did it run without error."
+
+For the RAG lab each task has an explicit rubric (e.g. `chunk_size_1000`, `documents_split`, `answer_generated_by_llm`). Each criterion is verified two ways:
+
+1. **AST analysis** — the grader parses your submitted source and checks for required constructs, argument values, and API calls.
+2. **Runtime namespace inspection** — Tasks 1 through N are executed and the live objects they produce are inspected: was a `Document` list actually built? Did `similarity_search` return 3 hits? Is the printed answer produced by the LLM from retrieved context, or hardcoded?
+
+Partial work earns partial credit. Running successfully without meeting the rubric does **not** earn full marks. Enable **🔧 Developer mode** in the sidebar (or append `?dev=1` to the URL) to see every criterion's pass/fail status, point value, reason, and the exact source the grader ran. Labs without a rubric fall back to legacy regex checks.
+
+Each lab is scored out of **100**. The RAG lab weights are T1 5 · T2 20 · T3 25 · T4 25 · T5 25. The **★ Score** page exports results as an Excel `.xlsx` file (summary sheet + per-task table + total), with CSV and JSON fallbacks.
+
+## Where to Go Next
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Clone the repo, install dependencies, and run your first lab task locally in under five minutes.
+  </Card>
+  <Card title="Labs Overview" icon="flask" href="/labs/overview">
+    Detailed walkthrough of all five labs — tasks, objectives, and what each one teaches.
+  </Card>
+  <Card title="Deployment" icon="cloud" href="/deployment">
+    Deploy to Streamlit Community Cloud, Docker/Compose, Render, Railway, or Fly.io.
+  </Card>
+  <Card title="JupyterLab" icon="terminal" href="/jupyter/overview">
+    Run the full lab stack in a pre-configured browser-based JupyterLab container.
+  </Card>
+</CardGroup>

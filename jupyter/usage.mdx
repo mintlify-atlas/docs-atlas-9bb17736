@@ -1,0 +1,158 @@
+---
+title: "Using the JupyterLab Notebooks to Practice GenAI"
+sidebarTitle: "Usage"
+description: "Open RAG_Lab_Participant.ipynb, run the Setup cell, fill in each task cell, and use the Score cell to grade your work in real time."
+---
+
+When you open the JupyterLab environment you land in a real notebook server with two files: `RAG_Lab_Participant.ipynb` — the exercise you complete — and `RAG_Lab.ipynb` — the fully-worked reference. The entire workflow happens inside the participant notebook: one Setup cell, a series of task cells where you write your solution, and a Score cell that gives you immediate, criterion-by-criterion feedback. No page navigation, no form submissions — just Python cells and a live kernel.
+
+## Step-by-step workflow
+
+<Steps>
+  <Step title="Open the participant notebook">
+    In the JupyterLab file browser on the left, double-click **`RAG_Lab_Participant.ipynb`**.
+
+    Do **not** open `RAG_Lab.ipynb` yet — that file contains the complete solution and will short-circuit the learning if you look at it first.
+  </Step>
+
+  <Step title="Run the Setup cell">
+    The first cell in the notebook is the **Setup** cell. Run it once with **Shift + Enter** (or the ▶ button).
+
+    It handles three things:
+    - Imports all required helpers (`grader`, `sandbox`, LangChain modules)
+    - Sets `SANDBOX_MODE` to `mock` by default (no API key needed)
+    - Makes the `grader` object available to every subsequent cell in the session
+
+    ```python
+    import os
+    # Mode is already set to "mock" by the container's default env var.
+    # To use a real LLM, change this before running:
+    # os.environ["SANDBOX_MODE"] = "openai"
+
+    from grader import Grader
+    from sandbox import get_sandbox
+
+    grader = Grader()
+    sandbox = get_sandbox()
+    print(f"SANDBOX_MODE = {os.environ.get('SANDBOX_MODE', 'mock')}")
+    ```
+
+    <Note>
+      You only need to run the Setup cell once per session. If you restart the kernel (Kernel → Restart), run Setup again before running any task cells.
+    </Note>
+  </Step>
+
+  <Step title="Fill in the task cells">
+    Each task cell is marked with a `%%task N` comment at the top. These are ordinary Python cells — the prefix is a convention used by the grader to identify your submission, not a custom IPython magic command.
+
+    Write your solution code below the `%%task N` line, then run the cell. Task cells build on each other: the variable you create in Task 1 is available in Task 2 without any re-import.
+
+    The RAG lab pipeline flows like this:
+
+    ```text
+    Task 1: Load documents        →  documents   (list of Document objects)
+    Task 2: Split into chunks     →  chunks      (smaller Document objects)
+    Task 3: Build a vectorstore   →  vectorstore (ChromaDB or mock equivalent)
+    Task 4: Create a retriever    →  retriever   (LangChain retriever)
+    Task 5: Build the RAG chain   →  rag_chain   (LangChain Runnable)
+    ```
+
+    You can run a task cell as many times as you like before scoring. Re-running overwrites the variable in the kernel — earlier tasks are not affected unless you re-run them too.
+  </Step>
+
+  <Step title="Run the Score cell to grade your work">
+    The **Score** cell is at the bottom of the notebook. Run it at any time — you do not need to finish all tasks first.
+
+    ```python
+    grader.score()
+    ```
+
+    The grader evaluates each criterion independently and prints a breakdown like:
+
+    ```text
+    ✔  Task 1 – documents loaded correctly          10 / 10
+    ✔  Task 2 – chunks within token limit            10 / 10
+    ✗  Task 3 – vectorstore contains embeddings       0 / 20
+    …
+    ──────────────────────────────────────────────────────
+    Total                                            20 / 100
+    ```
+
+    Partial marks are awarded where applicable. "It ran without errors" does **not** automatically earn full marks — the grader checks the actual values against the rubric criteria.
+  </Step>
+</Steps>
+
+## How `%%task N` cells work
+
+The `%%task N` comment at the top of each cell is a plain Python comment that signals to the grader which task a cell belongs to. It does not require any IPython extension or custom kernel. A typical task cell looks like this:
+
+```python
+# %%task 1
+# Load the PDF documents from the content/01-rag/data directory.
+
+from langchain_community.document_loaders import PyPDFDirectoryLoader
+
+loader = PyPDFDirectoryLoader("content/01-rag/data")
+documents = loader.load()
+print(f"Loaded {len(documents)} document(s)")
+```
+
+Because the cell is just Python, you can:
+- Add `print()` statements anywhere to inspect intermediate values
+- Use the JupyterLab variable inspector to browse objects
+- Split your solution across multiple cells if it helps you think — just make sure the final variable name matches what the grader expects
+
+## Variable persistence across cells
+
+The kernel is shared for the entire session. A variable created in one cell remains in memory until the kernel is restarted. This is intentional: the RAG lab is designed as a pipeline where each step depends on the previous one.
+
+```text
+documents  (Task 1) ──►  chunks     (Task 2) ──►  vectorstore  (Task 3)
+                                                        │
+                                              retriever (Task 4)
+                                                        │
+                                               rag_chain (Task 5)
+```
+
+If you change your Task 1 solution and re-run it, you must also re-run Tasks 2–5 to rebuild the downstream variables from the new `documents` value.
+
+<Note>
+  The **Score** cell always grades the current in-memory state of your variables. Re-run any task cell, then re-run **Score** — you will see the updated marks immediately.
+</Note>
+
+## Grading — same rubric as the Streamlit platform
+
+The `grader.py` file inside the container is byte-for-byte identical to the one used by the Streamlit platform. Scoring works through the same criterion-based system: each criterion checks a specific property of your output (type, length, embedding dimensionality, retrieval accuracy, etc.) and awards partial marks independently.
+
+A passing run on the JupyterLab environment and a passing run on the Streamlit platform are equivalent — the score means the same thing on both.
+
+## Switching to real LLM mode
+
+Mock mode uses FastEmbed for local embeddings and a lightweight text stub for generation. It is sufficient for completing Labs 1 and 2 and for understanding the pipeline structure. To run against a real language model:
+
+```python
+import os
+os.environ["SANDBOX_MODE"] = "openai"   # or "claude" for Anthropic
+```
+
+Add this to the Setup cell — or run it in a new cell before any task cell that makes an LLM call. The `sandbox.py` helper reads `SANDBOX_MODE` at call time and routes to the correct provider.
+
+<Warning>
+  Setting `SANDBOX_MODE` after you have already run a task cell that made LLM calls will not retroactively change the previous calls. Set the mode in the Setup cell, then run all task cells from the beginning.
+</Warning>
+
+## When to open `RAG_Lab.ipynb`
+
+`RAG_Lab.ipynb` is the fully-worked reference solution. It contains complete, working implementations of every task cell.
+
+<Tip>
+  Resist the temptation to open it immediately. The most effective way to use the reference notebook is: attempt every task independently, run **Score**, review which criteria you missed, make another attempt — then check the reference to understand how the canonical solution handles the cases you missed. You learn significantly more from the gap between your attempt and the reference than from reading the reference first.
+</Tip>
+
+When you do open `RAG_Lab.ipynb`, treat it as a discussion document. Read the markdown cells, compare the implementation choices, and note where your approach differed and why.
+
+## Mock mode and the FastEmbed model
+
+The first time you run a cell that triggers embedding in mock mode, FastEmbed downloads its model (~90 MB) to a local cache directory. Subsequent runs in the same container use the cached model and start instantly.
+
+On platforms where the container filesystem is ephemeral (Hugging Face Spaces, Railway free tier), the model re-downloads each time a new container starts. On Docker Compose with a volume mount, the cache persists between restarts.

@@ -1,0 +1,100 @@
+{
+  "projectType": "ai-ml",
+  "projectName": "GenAI Lab",
+  "projectDescription": "A hands-on GenAI and Agentic-AI practice platform with five labs covering RAG, tool calling, LangGraph agents, multi-agent systems, and MCP — deployable as a Streamlit app or a browser-based JupyterLab.",
+  "theme": "luma",
+  "primaryColor": "#6366F1",
+  "lightColor": "#EEF2FF",
+  "darkColor": "#312E81",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "deployment"
+            ]
+          },
+          {
+            "group": "Labs",
+            "pages": [
+              "labs/overview",
+              "labs/rag",
+              "labs/tool-calling",
+              "labs/agent",
+              "labs/multi-agent",
+              "labs/mcp"
+            ]
+          },
+          {
+            "group": "Platform Internals",
+            "pages": [
+              "platform/sandbox",
+              "platform/grader",
+              "platform/mcp-server"
+            ]
+          },
+          {
+            "group": "Configuration & Ops",
+            "pages": [
+              "config/modes-and-keys",
+              "config/content-authoring",
+              "config/troubleshooting"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "JupyterLab",
+        "groups": [
+          {
+            "group": "Jupyter Environment",
+            "pages": [
+              "jupyter/overview",
+              "jupyter/deploy",
+              "jupyter/usage"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Five end-to-end GenAI labs: RAG, Tool Calling, LangGraph Agent, Multi-Agent, and MCP",
+    "Real code execution via Python exec() — no simulation, genuine stdout/stderr/tracebacks",
+    "Criterion-based grading engine using AST analysis and runtime namespace inspection",
+    "Multi-mode LLM support: OpenAI (gpt-4o-mini), Claude (claude-sonnet-4-5), and keyless Mock",
+    "Real ChromaDB vector store with automatic fallback to LangChain InMemoryVectorStore",
+    "FastEmbed ONNX local embeddings for keyless operation",
+    "Progressive hints, solution reveal, and per-criterion score breakdown",
+    "Excel/CSV/JSON score export from the Score page",
+    "YAML-driven content model — add a lab by dropping a practice.yaml file",
+    "Dual deployment targets: Streamlit Community Cloud app and browser-based JupyterLab",
+    "Real FastMCP stdio server (mcp_server.py) for the MCP lab",
+    "Developer mode showing per-criterion pass/fail, earned points, and exact graded source"
+  ],
+  "publicApiSurface": [
+    "sandbox.get_chat_model(mode, *, model, temperature) -> BaseChatModel",
+    "sandbox.get_embeddings(mode, *, model) -> Embeddings",
+    "sandbox.make_vectorstore(chunks, embeddings, *, collection) -> VectorStore",
+    "sandbox.split_docs(docs, *, chunk_size, chunk_overlap) -> list[Document]",
+    "sandbox.load_sample_docs() -> list[Document]",
+    "sandbox.get_tools(names) -> list[BaseTool]",
+    "sandbox.mcp_stdio_config(server_name) -> dict",
+    "sandbox.resolve_mode(requested) -> str",
+    "sandbox.supports_tool_calling(mode) -> bool",
+    "sandbox.check_llm(mode) -> tuple[bool, str]",
+    "grader.grade_task(task_id, learner_code, *, lab_id, accumulated_source, mode, dev) -> dict",
+    "grader.has_criteria(lab_id, task_id) -> bool",
+    "grader.assemble_source(task_codes, mode) -> str",
+    "mcp_server: tool add(a, b) -> float",
+    "mcp_server: tool multiply(a, b) -> float",
+    "mcp_server: tool leave_allowance(kind) -> str",
+    "mcp_server: resource policy://notice-period -> str",
+    "content/<lab_id>/practice.yaml: lab_id, title, requires, mode_required, overview, tasks[]"
+  ]
+}

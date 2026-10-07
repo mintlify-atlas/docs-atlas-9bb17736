@@ -1,0 +1,212 @@
+---
+title: "Configure LLM Modes and API Keys in GenAI Lab"
+sidebarTitle: "Modes & Keys"
+description: "Set OPENAI_API_KEY or ANTHROPIC_API_KEY to enable real LLM mode. Without a key the platform runs in keyless Mock mode for Lab 1 and MCP Tasks 1–3."
+---
+
+GenAI Lab supports three distinct LLM backends, chosen at startup through a simple sidebar radio button. The platform's design principle is "real execution first" — every mode runs genuine Python, real LangChain objects, and a real vector store. Only the answer LLM differs across modes. Understanding how modes are resolved and how keys are validated saves you from silent failures and unexpected Mock-mode fallbacks during graded labs.
+
+## The four modes
+
+`resolve_mode()` in `sandbox.py` maps every incoming request to one of three operational modes. The fourth value, `auto`, is a resolution rule rather than a mode of its own.
+
+<Tabs>
+  <Tab title="openai">
+    Requires `OPENAI_API_KEY` (must start with `sk-`). Instantiates `ChatOpenAI(model="gpt-4o-mini")` for the answer LLM and `OpenAIEmbeddings(model="text-embedding-3-small")` for vector embeddings. This is the only mode that sends embedding requests to the OpenAI API, so it produces the highest-quality retrieval results.
+
+    ```python
+    # sandbox.py — get_chat_model("openai")
+    from langchain_openai import ChatOpenAI
+    return ChatOpenAI(model=model or DEFAULT_OPENAI_CHAT, temperature=temperature, **kw)
+
+    # sandbox.py — get_embeddings("openai")
+    from langchain_openai import OpenAIEmbeddings
+    return OpenAIEmbeddings(model=model or DEFAULT_OPENAI_EMBED, **kw)
+    ```
+  </Tab>
+  <Tab title="claude">
+    Requires `ANTHROPIC_API_KEY` (must start with `sk-ant-`). Instantiates `ChatAnthropic(model="claude-sonnet-4-5")`. Because Anthropic provides no embeddings API, the platform uses a local **FastEmbed** ONNX model (`BAAI/bge-small-en-v1.5`) for vector retrieval — no API key is consumed for embeddings.
+
+    ```python
+    # sandbox.py — get_chat_model("claude")
+    from langchain_anthropic import ChatAnthropic
+    return ChatAnthropic(model=model or DEFAULT_ANTHROPIC_CHAT,
+                         temperature=temperature, **kw)
+
+    # sandbox.py — get_embeddings("claude") falls through to _local_embeddings()
+    from langchain_community.embeddings import FastEmbedEmbeddings
+    return FastEmbedEmbeddings(model_name=model or DEFAULT_FASTEMBED)
+    ```
+  </Tab>
+  <Tab title="mock">
+    No API key required. Uses `MockGroundedChat`, a real `BaseChatModel` subclass that answers by finding the highest-overlap sentence in the `Context:` block of the prompt. No network calls are made for the LLM. Embeddings use the same local FastEmbed ONNX model as Claude mode.
+
+    ```python
+    # sandbox.py — MockGroundedChat excerpt
+    class MockGroundedChat(BaseChatModel):
+        """Demo only. Answers from a 'Context:' block; cannot do tool calling."""
+        model: str = "mock-grounded-1"
+        temperature: float = 0.0
+    ```
+
+    <Warning>
+      Mock mode **cannot emit tool calls**. Labs 2–4 (`mode_required: real`) and MCP Tasks 4–5 (`needs_real: true`) are hard-blocked when running in Mock mode — they are not faked or simulated, and you will see a clear message rather than incorrect output.
+    </Warning>
+  </Tab>
+  <Tab title="auto (default)">
+    The sidebar selects this at startup. `resolve_mode("auto")` checks environment variables in order and returns the first available real mode:
+
+    ```python
+    # sandbox.py
+    def resolve_mode(requested: Optional[str] = None) -> str:
+        m = (requested or MODE or "auto").lower()
+        if m in ("real", "auto"):
+            return "openai" if has_openai() else "claude" if has_anthropic() else "mock"
+        return "claude" if m == "anthropic" else m
+    ```
+
+    If neither `OPENAI_API_KEY` nor `ANTHROPIC_API_KEY` is present, the platform falls back to Mock mode automatically. The sidebar always shows which mode is currently active.
+  </Tab>
+</Tabs>
+
+## Environment variables
+
+Every configurable value is read from an environment variable on the server side. The table below lists all variables that `sandbox.py` reads.
+
+| Variable | Purpose | Default | Format check |
+|---|---|---|---|
+| `OPENAI_API_KEY` | Enables OpenAI mode | _(none)_ | Must start with `sk-` |
+| `ANTHROPIC_API_KEY` | Enables Claude mode | _(none)_ | Must start with `sk-ant-` |
+| `OPENAI_MODEL` | Override the OpenAI chat model | `gpt-4o-mini` | Any valid OpenAI model ID |
+| `OPENAI_EMBED_MODEL` | Override the OpenAI embedding model | `text-embedding-3-small` | Any valid OpenAI embedding model ID |
+| `ANTHROPIC_MODEL` | Override the Claude chat model | `claude-sonnet-4-5` | Any valid Anthropic model ID |
+| `FASTEMBED_MODEL` | Override the local FastEmbed model | `BAAI/bge-small-en-v1.5` | Any model supported by `fastembed` |
+| `SANDBOX_MODE` | Force a specific mode | `auto` | Set automatically per-run by the app; override with caution |
+
+```python
+# sandbox.py — how defaults are applied
+DEFAULT_OPENAI_CHAT  = os.environ.get("OPENAI_MODEL",       "gpt-4o-mini")
+DEFAULT_OPENAI_EMBED = os.environ.get("OPENAI_EMBED_MODEL", "text-embedding-3-small")
+DEFAULT_ANTHROPIC_CHAT = os.environ.get("ANTHROPIC_MODEL",  "claude-sonnet-4-5")
+DEFAULT_FASTEMBED    = os.environ.get("FASTEMBED_MODEL",    "BAAI/bge-small-en-v1.5")
+```
+
+## Setting your API key
+
+<Tabs>
+  <Tab title="Local">
+    Export the key before starting the app. Both variables can coexist; `auto` mode will prefer OpenAI.
+
+    ```bash
+    export OPENAI_API_KEY=sk-...
+    # or
+    export ANTHROPIC_API_KEY=sk-ant-...
+
+    streamlit run streamlit_app.py
+    ```
+  </Tab>
+  <Tab title="Streamlit Cloud">
+    Keys set in the environment persist across reboots and are never visible in the browser or build logs.
+
+    <Steps>
+      <Step title="Open app settings">
+        Go to your app dashboard on share.streamlit.io and click **Manage app → Settings**.
+      </Step>
+      <Step title="Add secrets">
+        Select the **Secrets** tab and add your key in TOML format:
+
+        ```toml
+        OPENAI_API_KEY = "sk-..."
+        # or
+        ANTHROPIC_API_KEY = "sk-ant-..."
+        ```
+      </Step>
+      <Step title="Save and reboot">
+        Click **Save** — Streamlit Cloud injects the secrets as environment variables before the app starts. Press **Reboot app** to apply immediately.
+      </Step>
+    </Steps>
+
+    The `streamlit_app.py` startup code surfaces Streamlit Cloud secrets into `os.environ` so `sandbox.py` can read them with the same `os.environ.get(...)` calls used locally:
+
+    ```python
+    # streamlit_app.py — secret injection at startup
+    for _sec in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_MODEL",
+                 "ANTHROPIC_MODEL", "FASTEMBED_MODEL"):
+        try:
+            if _sec in st.secrets and not os.environ.get(_sec):
+                os.environ[_sec] = str(st.secrets[_sec])
+        except Exception:
+            pass
+    ```
+  </Tab>
+  <Tab title="Docker / Compose">
+    Pass keys through the `environment:` section so they are available to the container without being baked into the image.
+
+    ```yaml
+    # docker-compose.yml
+    services:
+      genai-lab:
+        build: .
+        environment:
+          - OPENAI_API_KEY=${OPENAI_API_KEY}
+          # or
+          - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+        ports:
+          - "8501:8501"
+    ```
+
+    Or with the bare `docker run` command:
+
+    ```bash
+    docker run -e OPENAI_API_KEY=sk-... -p 8501:8501 genai-lab
+    ```
+  </Tab>
+</Tabs>
+
+## Key validation with `check_llm`
+
+When a key is present, the sidebar makes **one tiny real API call** on load to verify the key and model actually respond. This surfaces an invalid or expired key immediately — before you attempt a graded Run five tasks later.
+
+```python
+# sandbox.py
+def check_llm(mode: Optional[str] = None) -> tuple[bool, str]:
+    """Make ONE tiny real call to confirm the key + model actually work.
+    Returns (ok, detail). Used by the app to show a key-status line so an
+    invalid key is caught immediately, not five Runs later."""
+    mode = resolve_mode(mode)
+    if mode == "mock":
+        return True, "Mock mode — no key required."
+    try:
+        model = get_chat_model(mode, max_tokens=5)
+        model.invoke("ping")
+        return True, f"{mode} key valid — model `{getattr(model, 'model', mode)}` responded."
+    except Exception as exc:
+        return False, f"{exc.__class__.__name__}: {str(exc)[:280]}"
+```
+
+The sidebar displays a green ✅ caption on success or a red error box on failure, with instructions to fix the key or switch to Mock mode. You can force a re-check at any time with the **Re-check key** button.
+
+## Tool-calling availability
+
+Agent and multi-agent labs require a model capable of emitting structured tool calls. `supports_tool_calling` exposes this as a single boolean check:
+
+```python
+# sandbox.py
+def supports_tool_calling(mode: Optional[str] = None) -> bool:
+    """Mock cannot emit tool calls — agent labs need a real LLM."""
+    return resolve_mode(mode) in ("openai", "claude")
+```
+
+| Mode | `supports_tool_calling` | Effect on blocked labs |
+|---|---|---|
+| `openai` | `True` | All labs and tasks available |
+| `claude` | `True` | All labs and tasks available |
+| `mock` | `False` | Labs 2–4 and MCP Tasks 4–5 are blocked |
+
+<Note>
+  Switching from Mock to OpenAI or Claude in the sidebar takes effect for the **next Run**. Code already typed in the editor is preserved — you do not need to retype it.
+</Note>
+
+## Key security
+
+API keys are handled server-side at all times. The key is read from an environment variable or Streamlit secret, injected into `os.environ` before `sandbox.py` loads, and used only inside the server process. The key is never hard-coded in source, never included in the compiled session state sent to the browser, and never echoed in execution output.
